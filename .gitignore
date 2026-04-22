@@ -1,0 +1,19 @@
+# Virtual Environment
+.venv/
+__pycache__/
+*.pyc
+
+# Data & ZIP
+*.zip
+*.hea
+*.dat
+*.png
+data/
+
+# Model Weights (Large files)
+# 만약 가중치를 꼭 올리고 싶으시면 아래 줄을 주석 처리하세요. 
+# 하지만 깃허브 권장 용량(50MB)을 넘을 수 있어 제외하는 것이 일반적입니다.
+model_weights/
+
+# Kaggle working directory
+kaggle/working/data/

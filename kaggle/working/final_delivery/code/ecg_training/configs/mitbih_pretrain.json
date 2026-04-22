@@ -1,0 +1,42 @@
+{
+  "seed": 42,
+  "output_root": "runs",
+  "archives": {
+    "mitbih_zip": "mit-bih-arrhythmia-database-1.0.0.zip",
+    "extract_root": "data/raw"
+  },
+  "dataset": {
+    "beat_window_left": 108,
+    "beat_window_right": 144,
+    "train_records": ["101", "106", "108", "109", "112", "114", "115", "116", "118", "119", "122", "124", "201", "203", "205", "207", "208", "209", "215", "220", "223", "230"],
+    "val_records": ["100", "103", "111", "117", "121", "123", "200", "202", "210", "212", "213", "214", "219", "221", "222", "228", "231", "232", "233", "234"],
+    "aami_classes": ["N", "S", "V", "F", "Q"],
+    "max_beats_per_record": 4000
+  },
+  "augmentation": {
+    "enabled": true,
+    "noise_std": 0.01,
+    "baseline_wander_std": 0.02,
+    "amplitude_scale_range": [0.97, 1.03],
+    "time_shift_samples": 8,
+    "lead_dropout_prob": 0.0,
+    "time_mask_prob": 0.05,
+    "time_mask_max_width": 10
+  },
+  "model": {
+    "input_leads": 2,
+    "embedding_dim": 256,
+    "blocks": [2, 2, 2],
+    "base_channels": 32,
+    "dropout": 0.2
+  },
+  "optimization": {
+    "epochs": 50,
+    "batch_size": 128,
+    "lr": 0.0003,
+    "weight_decay": 0.0001,
+    "num_workers": 4,
+    "patience": 8,
+    "grad_clip_norm": 1.0
+  }
+}
