@@ -51,6 +51,40 @@ def load_ptbxl_metadata(dataset_dir, superclasses):
     return database
 
 
+def load_arrhythmia_metadata(dataset_dir):
+    """
+    PTB-XL 데이터셋에서 부정맥 6종(AFib, AFLT, SVPB, PVC, SVTA, VTA)을 정밀 추출합니다.
+    """
+    dataset_dir = Path(dataset_dir)
+    database = pd.read_csv(
+        dataset_dir / "ptbxl_database.csv",
+        index_col="ecg_id",
+        converters={"scp_codes": ast.literal_eval},
+    )
+    
+    # 정밀 타격할 부정맥 레이블 정의 (SCP Codes)
+    # AFIB: 심방세동, AFLT: 심방조동, SVPB: 상심실성 조기수축, 
+    # PVC: 심실성 조기수축, SVTA: 상심실성 빈맥, VTA: 심실성 빈맥
+    arrhythmia_classes = ["AFIB", "AFLT", "SVPB", "PVC", "SVTA", "VTA"]
+    
+    labels = []
+    for codes in database["scp_codes"]:
+        active = set()
+        for code in codes:
+            if code in arrhythmia_classes:
+                active.add(code)
+        # 6개 클래스에 대한 멀티 레이블 벡터 생성
+        labels.append([1.0 if name in active else 0.0 for name in arrhythmia_classes])
+
+    database = database.copy()
+    database["labels"] = labels
+    database["num_positive_labels"] = [int(sum(label_row)) for label_row in labels]
+    
+    # 해당 부정맥 중 하나라도 가진 데이터만 필터링
+    database = database[database["num_positive_labels"] > 0].reset_index()
+    return database, arrhythmia_classes
+
+
 class PTBXLMultilabelDataset(Dataset):
     def __init__(self, frame, dataset_dir, sample_rate, duration_seconds, normalization, augmentation=None):
         self.frame = frame.reset_index(drop=True)

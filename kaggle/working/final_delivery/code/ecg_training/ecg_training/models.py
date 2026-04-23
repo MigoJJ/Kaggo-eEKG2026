@@ -106,6 +106,38 @@ class PTBXLClassifier(nn.Module):
         return self.head(features)
 
 
+class ArrhythmiaSpecialist(nn.Module):
+    """
+    부정맥(AFib, PVC 등) 정밀 진단을 위한 하이브리드 모델.
+    기존 CNN 특징 추출기에 RNN(LSTM)을 결합하여 시간적 불규칙성을 포착합니다.
+    """
+    def __init__(self, backbone, embedding_dim=256, num_arrhythmia_classes=6, dropout=0.3):
+        super().__init__()
+        self.backbone = backbone
+        
+        # 시간적 패턴 분석을 위한 LSTM (AFib 등 불규칙한 RR 간격 탐지용)
+        # 특징 벡터를 시퀀스로 해석하거나 백본의 중간 출력을 시퀀스로 받을 수 있습니다.
+        self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=128, num_layers=2, 
+                            batch_first=True, bidirectional=True, dropout=dropout)
+        
+        self.specialized_head = nn.Sequential(
+            nn.Linear(128 * 2, 64),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(64, num_arrhythmia_classes)
+        )
+
+    def forward(self, signal):
+        # signal: (batch, leads, length)
+        features = self.backbone(signal) # (batch, embedding_dim)
+        
+        # 특징 벡터를 시퀀스 데이터로 변환 (추후 백본 수정으로 시퀀스 출력을 직접 받을 수 있음)
+        x = features.unsqueeze(1) # (batch, 1, embedding_dim)
+        lstm_out, _ = self.lstm(x)
+        logits = self.specialized_head(lstm_out[:, -1, :])
+        return logits
+
+
 class MITBIHBeatClassifier(nn.Module):
     def __init__(self, input_leads, num_classes, embedding_dim, blocks, base_channels, dropout):
         super().__init__()
