@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+import numpy as np
 
 import sys
 # 현재 경로를 추가하여 ecg_training 모듈을 찾을 수 있게 함
@@ -14,7 +15,7 @@ sys.path.append(os.path.join(os.getcwd(), "kaggle/working/final_delivery/code/ec
 
 from ecg_training.datasets import load_arrhythmia_metadata, PTBXLMultilabelDataset
 from ecg_training.models import PTBXLClassifier, ArrhythmiaSpecialist
-from ecg_training.metrics import compute_metrics
+from ecg_training.metrics import evaluate_multilabel
 
 def main():
     parser = argparse.ArgumentParser()
@@ -99,7 +100,10 @@ def main():
         
         val_preds_np = torch.cat(all_preds).numpy()
         val_targets_np = torch.cat(all_targets).numpy()
-        val_metrics = compute_metrics(val_targets_np, val_preds_np, class_names)
+        
+        # 기본 임계값 0.5 설정
+        thresholds = np.full(len(class_names), 0.5)
+        val_metrics = evaluate_multilabel(val_targets_np, val_preds_np, thresholds, class_names)
         
         current_metric = val_metrics["macro_pr_auc"]
         print(f"Epoch {epoch+1}/{args.epochs} - Loss: {train_loss/len(train_loader):.4f} - Val PR-AUC: {current_metric:.4f}")
