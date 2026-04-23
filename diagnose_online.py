@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import sys
+import urllib.request
 
 # 1. 경로 및 모델 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,17 +34,20 @@ def load_models():
     main_model = PTBXLClassifier(**model_config)
     if os.path.exists(WEIGHTS_PATH):
         checkpoint = torch.load(WEIGHTS_PATH, map_location=device)
-        main_model.load_state_dict(checkpoint.get('model_state_dict', checkpoint))
+        state_dict = checkpoint.get('model_state_dict', checkpoint)
+        main_model.load_state_dict(state_dict)
         print("✅ 메인 진단 모델 로드 완료")
+    else:
+        print("⚠️ 메인 모델 가중치 파일을 찾을 수 없습니다.")
     
     main_model.to(device).eval()
 
     # 부정맥 정밀 모델 (6종)
-    # 메인 모델의 백본을 공유하여 전문가 모델 생성
     specialist = ArrhythmiaSpecialist(backbone=main_model.backbone, num_arrhythmia_classes=6)
     if os.path.exists(ARRHYTHMIA_WEIGHTS_PATH):
         checkpoint = torch.load(ARRHYTHMIA_WEIGHTS_PATH, map_location=device)
-        specialist.load_state_dict(checkpoint.get('model_state_dict', checkpoint))
+        state_dict = checkpoint.get('model_state_dict', checkpoint)
+        specialist.load_state_dict(state_dict)
         print("✅ 부정맥 정밀 분석 모델 로드 완료")
     else:
         print("💡 부정맥 정밀 모델 가중치가 없어 초기 상태로 작동합니다. (학습 필요)")
@@ -51,12 +55,39 @@ def load_models():
     specialist.to(device).eval()
     return main_model, specialist, device
 
-# ... (preprocess_signal 함수는 동일)
+# 2. 전처리 함수 (Z-score Normalization)
+def preprocess_signal(signal):
+    # signal shape: (length, leads) -> (1000, 12)
+    # Z-score normalization per lead
+    means = signal.mean(axis=0, keepdims=True)
+    stds = signal.std(axis=0, keepdims=True) + 1e-7
+    normalized = (signal - means) / stds
+    # 모델 입력 형태: (1, 12, 1000)
+    return torch.tensor(normalized.T, dtype=torch.float32).unsqueeze(0)
 
 # 3. 데이터 다운로드 및 진단 실행
 def run_diagnosis():
-    # ... (데이터 다운로드 로직 동일)
+    print("\n🌐 PhysioNet PTB-XL 데이터 다운로드 중...")
+    record_id = '00002'
+    base_url = 'https://physionet.org/files/ptb-xl/1.0.3/records100/00000/'
     
+    try:
+        # 헤더와 데이터 파일 수동 다운로드
+        for ext in ['.hea', '.dat']:
+            file_name = f'{record_id}_lr{ext}'
+            if not os.path.exists(file_name):
+                print(f"  - {file_name} 받는 중...")
+                urllib.request.urlretrieve(base_url + file_name, file_name)
+        
+        # 로컬에서 읽기
+        record = wfdb.rdrecord(f'{record_id}_lr')
+        print(f"✅ 데이터 로드 성공: {record_id}_lr")
+    except Exception as e:
+        print(f"❌ 데이터 로드 실패: {e}")
+        return
+
+    signal = record.p_signal
+
     # 모델 로드
     main_model, specialist, device = load_models()
     
@@ -82,7 +113,7 @@ def run_diagnosis():
 
     print(f"\n🩺 [2. 부정맥 정밀 분석 결과]")
     for cls, prob in zip(spec_classes, spec_probs):
-        indicator = "🔶" if prob > 0.3 else "⚪" # 부정맥은 더 민감하게(0.3) 표시
+        indicator = "🔶" if prob > 0.3 else "⚪" # 부정맥은 더 민감하게 표시
         print(f" {indicator} {cls:5}: {prob*100:6.2f}%")
 
     # 4. 시각화 (첫 3개 리드만 예시로 출력)
@@ -97,5 +128,4 @@ def run_diagnosis():
     print(f"\n📈 ECG 파형이 'ecg_plot.png'로 저장되었습니다.")
 
 if __name__ == "__main__":
-    # 인자 없이 실행 (내부에서 자동으로 레코드 선택)
     run_diagnosis()
