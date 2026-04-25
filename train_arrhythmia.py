@@ -16,6 +16,19 @@ sys.path.append(os.path.join(os.getcwd(), "kaggle/working/final_delivery/code/ec
 from ecg_training.datasets import load_arrhythmia_metadata, PTBXLMultilabelDataset
 from ecg_training.models import PTBXLClassifier, ArrhythmiaSpecialist
 from ecg_training.metrics import evaluate_multilabel
+from ecg_training.losses import FocalLoss
+
+def mixup_data(x, y, alpha=0.4):
+    """베타 분포를 사용하여 데이터와 레이블을 섞습니다."""
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1
+    batch_size = x.size()[0]
+    index = torch.randperm(batch_size).to(x.device)
+    mixed_x = lam * x + (1 - lam) * x[index]
+    mixed_y = lam * y + (1 - lam) * y[index]
+    return mixed_x, mixed_y
 
 def main():
     parser = argparse.ArgumentParser()
@@ -24,6 +37,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default="runs/arrhythmia_specialist")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--mixup", action="store_true", help="Mixup 증강 사용 여부")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -68,12 +82,13 @@ def main():
     model.to(device)
 
     # 3. 손실 함수 및 최적화
-    criterion = nn.BCEWithLogitsLoss()
+    # 부정맥 클래스 불균형을 고려하여 Focal Loss 사용
+    criterion = FocalLoss(gamma=2.0)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # 4. 학습 루프
     best_metric = 0
-    print(f"🚀 학습 시작 (Target: {class_names})")
+    print(f"🚀 학습 시작 (Target: {class_names}, Mixup: {args.mixup})")
     
     for epoch in range(args.epochs):
         model.train()
@@ -82,6 +97,10 @@ def main():
             optimizer.zero_grad()
             signals = batch["signal"].to(device)
             targets = batch["target"].to(device)
+            
+            if args.mixup:
+                signals, targets = mixup_data(signals, targets)
+                
             outputs = model(signals)
             loss = criterion(outputs, targets)
             loss.backward()

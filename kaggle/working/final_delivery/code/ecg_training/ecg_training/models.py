@@ -51,9 +51,12 @@ class LeadEncoder1D(nn.Module):
         self.pool = nn.AdaptiveAvgPool1d(1)
         self.proj = nn.Linear(channels, embedding_dim)
 
-    def forward(self, x):
+    def forward(self, x, return_sequence=False):
         x = self.stem(x)
         x = self.layers(x)
+        if return_sequence:
+            # (batch, channels, length) -> (batch, length, channels)
+            return x.transpose(1, 2)
         x = self.pool(x).squeeze(-1)
         return self.proj(x)
 
@@ -86,8 +89,18 @@ class ECGBackbone(nn.Module):
             nn.Dropout(dropout),
         )
 
-    def forward(self, signal):
+    def forward(self, signal, return_sequence=False):
         batch_size, leads, length = signal.shape
+        if return_sequence:
+            # 시퀀스 정보를 유지하며 인코딩
+            # (batch * leads, 1, length) -> (batch * leads, seq_len, feat_dim)
+            seq = self.lead_encoder(signal.reshape(batch_size * leads, 1, length), return_sequence=True)
+            feat_dim = seq.shape[-1]
+            # (batch, leads, seq_len, feat_dim) -> (batch, seq_len, leads * feat_dim) 또는 적절한 차원 축소
+            # 여기서는 리드별 시퀀스를 평균하여 전체적인 시간 패턴을 유지합니다.
+            seq = seq.reshape(batch_size, leads, -1, feat_dim)
+            return seq.mean(dim=1) # (batch, seq_len, feat_dim)
+
         encoded = self.lead_encoder(signal.reshape(batch_size * leads, 1, length))
         encoded = encoded.reshape(batch_size, leads, -1)
         pooled_mean = encoded.mean(dim=1)
@@ -114,10 +127,11 @@ class ArrhythmiaSpecialist(nn.Module):
     def __init__(self, backbone, embedding_dim=256, num_arrhythmia_classes=6, dropout=0.3):
         super().__init__()
         self.backbone = backbone
+        # backbone의 최종 채널 수 (base_channels * 2^3 = 32 * 8 = 256)
+        # LeadEncoder1D의 self.layers를 거친 후의 채널 수입니다.
+        lstm_input_dim = 256 
         
-        # 시간적 패턴 분석을 위한 LSTM (AFib 등 불규칙한 RR 간격 탐지용)
-        # 특징 벡터를 시퀀스로 해석하거나 백본의 중간 출력을 시퀀스로 받을 수 있습니다.
-        self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=128, num_layers=2, 
+        self.lstm = nn.LSTM(input_size=lstm_input_dim, hidden_size=128, num_layers=2, 
                             batch_first=True, bidirectional=True, dropout=dropout)
         
         self.specialized_head = nn.Sequential(
@@ -129,11 +143,11 @@ class ArrhythmiaSpecialist(nn.Module):
 
     def forward(self, signal):
         # signal: (batch, leads, length)
-        features = self.backbone(signal) # (batch, embedding_dim)
+        # 백본에서 시퀀스 특징 추출: (batch, seq_len, feat_dim)
+        seq_features = self.backbone(signal, return_sequence=True)
         
-        # 특징 벡터를 시퀀스 데이터로 변환 (추후 백본 수정으로 시퀀스 출력을 직접 받을 수 있음)
-        x = features.unsqueeze(1) # (batch, 1, embedding_dim)
-        lstm_out, _ = self.lstm(x)
+        lstm_out, _ = self.lstm(seq_features)
+        # 마지막 타임스텝의 출력을 사용하여 분류
         logits = self.specialized_head(lstm_out[:, -1, :])
         return logits
 
