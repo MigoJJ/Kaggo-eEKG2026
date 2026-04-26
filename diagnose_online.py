@@ -139,7 +139,38 @@ def get_clinical_reasoning(main_probs, spec_probs, rr_metrics):
 
     return reasons
 
-# 5. 데이터 다운로드 및 진단 실행
+# 5. LLM 연계 리포트 생성 엔진 (4단계: LLM-Linked Report)
+def generate_llm_report(record_id, findings, clinical_reasons, rr_metrics):
+    """
+    추출된 모든 정보를 종합하여 LLM(예: GPT-4)이 작성한 듯한 자연스러운 서술형 리포트를 생성합니다.
+    (현재는 시뮬레이션된 템플릿 사용)
+    """
+    summary = f"본 환자(Record: {record_id})의 ECG 분석 결과, "
+    
+    if len(findings) == 1 and "정상 동리듬(Normal Sinus Rhythm) 가능성 높음" in findings[0]:
+        summary += "전반적으로 특이 소견이 없는 정상적인 심박동을 보이고 있습니다. "
+    else:
+        summary += f"총 {len(findings)}가지의 주요 소견이 관찰됩니다. "
+        
+    if rr_metrics:
+        summary += f"평균 심박수는 {rr_metrics['avg_hr']:.1f} BPM이며, "
+        if rr_metrics['rr_cv'] > 15:
+            summary += "RR 간격이 매우 불규칙하여 심방세동과 같은 부정맥 가능성을 시사합니다. "
+        else:
+            summary += "심박 리듬은 비교적 규칙적입니다. "
+
+    summary += "\n\n[전문 판독 제언]\n"
+    if clinical_reasons:
+        for reason in clinical_reasons:
+            summary += f"- {reason}\n"
+    else:
+        summary += "- AI 탐지 결과와 정량적 지표 사이에 특이한 불일치가 없으며 안정적인 상태임.\n"
+        
+    summary += "\n[임상적 권고]\n상기 소견을 종합할 때, 환자의 실제 임상 증상(두근거림, 가슴 통증 등)과 대조하여 분석하시기 바라며, 필요시 24시간 홀터 모니터링 검사를 고려할 것을 권장합니다."
+    
+    return summary
+
+# 6. 데이터 다운로드 및 진단 실행
 def run_diagnosis():
     print("\n🌐 PhysioNet PTB-XL 데이터 다운로드 중...")
     record_id = '00002'
@@ -243,6 +274,9 @@ def run_diagnosis():
                     "SVTA": "상심실성 빈맥", "VTA": "심실성 빈맥"}
             findings.append(f"부정맥 확인: {desc.get(cls, cls)} 소견")
 
+    # 4단계: LLM 연계 서술형 리포트 생성
+    llm_narrative = generate_llm_report(record_id, findings, clinical_reasons, rr_metrics)
+
     # 리포트 텍스트 구성
     report_lines = []
     report_lines.append("="*50)
@@ -251,9 +285,12 @@ def run_diagnosis():
     report_lines.append(f" [데이터 정보] Record ID: {record_id}_lr")
     report_lines.append(f" [분석 시간] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (KST)")
     report_lines.append("-" * 50)
-    
-    # 2단계 수치 정보 추가
-    report_lines.append(" [1. 신호 정량 분석 (Signal Metrics)]")
+
+    report_lines.append(" [1. AI 전문의 분석 요약 (Expert Interpretation)]")
+    report_lines.append(llm_narrative)
+    report_lines.append("-" * 50)
+
+    report_lines.append(" [2. 신호 정량 분석 (Signal Metrics)]")
     if rr_metrics:
         report_lines.append(f"  - 평균 심박수: {rr_metrics['avg_hr']:.1f} BPM")
         report_lines.append(f"  - RR 간격 변동률(CV): {rr_metrics['rr_cv']:.2f}%")
@@ -263,7 +300,7 @@ def run_diagnosis():
         report_lines.append("  - R-peak 탐지 실패 (분석 불가)")
     report_lines.append("-" * 50)
 
-    report_lines.append(" [2. 종합 판독 소견 (Clinical Impression)]")
+    report_lines.append(" [3. 종합 판독 소견 (Clinical Impression)]")
     if findings:
         for i, find in enumerate(findings):
             report_lines.append(f"  {i+1}. {find}")
@@ -271,7 +308,7 @@ def run_diagnosis():
         report_lines.append("  - 특이 소견 없음")
     report_lines.append("-" * 50)
 
-    report_lines.append(" [3. 의학적 추론 및 근거 (Clinical Reasoning)]")
+    report_lines.append(" [4. 의학적 추론 및 근거 (Clinical Reasoning)]")
     if clinical_reasons:
         for i, reason in enumerate(clinical_reasons):
             report_lines.append(f"  ● {reason}")
@@ -279,7 +316,7 @@ def run_diagnosis():
         report_lines.append("  - 추가적인 추론 근거 없음")
     report_lines.append("-" * 50)
 
-    report_lines.append(" [4. 상세 진단 데이터]")
+    report_lines.append(" [5. 상세 진단 데이터]")
     report_lines.append("  <일반 진단 (PTB-XL 5개 대분류)>")
     for cls, prob in zip(main_classes, main_probs):
         indicator = "🔴" if prob > 0.5 else "⚪"
@@ -290,12 +327,14 @@ def run_diagnosis():
         indicator = "🔶" if prob > 0.3 else "⚪"
         report_lines.append(f"   {indicator} {cls:5}: {prob*100:6.2f}%")
     report_lines.append("-" * 50)
-    report_lines.append(f" [5. XAI 분석 (Grad-CAM)]")
+
+    report_lines.append(f" [6. XAI 분석 (Grad-CAM)]")
     report_lines.append(f"  - 타겟 클래스: {target_class_name}")
     report_lines.append(f"  - 이미지('ecg_plot.png')의 붉은 하이라이트 구간이 {target_class_name} 판독의 주요 근거임.")
     report_lines.append("-" * 50)
 
-    report_lines.append(" [6. 의학적 주의사항]")
+    report_lines.append(" [7. 의학적 주의사항]")
+
 
     report_lines.append("  ※ 본 리포트는 AI 모델의 분석 결과이며 전문의의 최종 판독을")
     report_lines.append("     대체할 수 없습니다. 임상적 결정 전 반드시 전문가와 상의하십시오.")
