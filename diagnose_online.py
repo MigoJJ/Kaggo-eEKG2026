@@ -112,7 +112,34 @@ def analyze_rr_intervals(signal, fs=100):
         "intervals": rr_intervals
     }
 
-# 3. 데이터 다운로드 및 진단 실행
+# 4. 의학적 지식 베이스 기반 추론 엔진 (3단계: Knowledge Base & Template)
+def get_clinical_reasoning(main_probs, spec_probs, rr_metrics):
+    """
+    AI 확률값과 정량적 지표를 결합하여 의학적 근거가 포함된 설명문을 생성합니다.
+    """
+    reasons = []
+    
+    # 심방세동(AFIB) 추론 로직
+    if spec_probs[0] > 0.3:
+        if rr_metrics and rr_metrics['rr_cv'] > 15:
+            reasons.append("심방세동(AFIB): AI가 높은 확률로 탐지했으며, 실제 측정된 RR 간격 변동률이 {:.2f}%로 매우 불규칙하여 임상적으로 일치함.".format(rr_metrics['rr_cv']))
+        else:
+            reasons.append("심방세동(AFIB) 의심: AI는 탐지했으나, 측정된 RR 간격은 규칙적임. P파 소실 여부에 대한 추가 확인이 필요함.")
+
+    # 서맥/빈맥 추론 로직
+    if rr_metrics:
+        if rr_metrics['avg_hr'] < 60:
+            reasons.append("서맥(Bradycardia): 평균 심박수가 {:.1f} BPM으로 정상 범위(60-100)보다 낮음.".format(rr_metrics['avg_hr']))
+        elif rr_metrics['avg_hr'] > 100:
+            reasons.append("빈맥(Tachycardia): 평균 심박수가 {:.1f} BPM으로 정상 범위보다 높음.".format(rr_metrics['avg_hr']))
+
+    # 심근경색(MI) 추론 로직
+    if main_probs[1] > 0.5:
+        reasons.append("심근경색(MI) 의심: AI가 ST-T 파형의 비정상적 변화를 감지함. 효소 검사 및 임상 증상 확인 권장.")
+
+    return reasons
+
+# 5. 데이터 다운로드 및 진단 실행
 def run_diagnosis():
     print("\n🌐 PhysioNet PTB-XL 데이터 다운로드 중...")
     record_id = '00002'
@@ -190,6 +217,9 @@ def run_diagnosis():
 
     spec_probs_np = spec_probs.detach().cpu().numpy()[0]
     
+    # 3단계: 지식 베이스 기반 추론 엔진 실행
+    clinical_reasons = get_clinical_reasoning(main_probs, spec_probs_np, rr_metrics)
+
     # 결과 해석 및 리포트 생성
     main_classes = ["NORM", "MI", "STTC", "CD", "HYP"]
     spec_classes = ["AFIB", "AFLT", "SVPB", "PVC", "SVTA", "VTA"]
@@ -241,7 +271,15 @@ def run_diagnosis():
         report_lines.append("  - 특이 소견 없음")
     report_lines.append("-" * 50)
 
-    report_lines.append(" [3. 상세 진단 데이터]")
+    report_lines.append(" [3. 의학적 추론 및 근거 (Clinical Reasoning)]")
+    if clinical_reasons:
+        for i, reason in enumerate(clinical_reasons):
+            report_lines.append(f"  ● {reason}")
+    else:
+        report_lines.append("  - 추가적인 추론 근거 없음")
+    report_lines.append("-" * 50)
+
+    report_lines.append(" [4. 상세 진단 데이터]")
     report_lines.append("  <일반 진단 (PTB-XL 5개 대분류)>")
     for cls, prob in zip(main_classes, main_probs):
         indicator = "🔴" if prob > 0.5 else "⚪"
@@ -252,13 +290,13 @@ def run_diagnosis():
         indicator = "🔶" if prob > 0.3 else "⚪"
         report_lines.append(f"   {indicator} {cls:5}: {prob*100:6.2f}%")
     report_lines.append("-" * 50)
-
-    report_lines.append(f" [4. XAI 분석 (Grad-CAM)]")
+    report_lines.append(f" [5. XAI 분석 (Grad-CAM)]")
     report_lines.append(f"  - 타겟 클래스: {target_class_name}")
     report_lines.append(f"  - 이미지('ecg_plot.png')의 붉은 하이라이트 구간이 {target_class_name} 판독의 주요 근거임.")
     report_lines.append("-" * 50)
 
-    report_lines.append(" [5. 의학적 주의사항]")
+    report_lines.append(" [6. 의학적 주의사항]")
+
     report_lines.append("  ※ 본 리포트는 AI 모델의 분석 결과이며 전문의의 최종 판독을")
     report_lines.append("     대체할 수 없습니다. 임상적 결정 전 반드시 전문가와 상의하십시오.")
     report_lines.append("="*50)
