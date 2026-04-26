@@ -255,27 +255,43 @@ def run_diagnosis():
     main_classes = ["NORM", "MI", "STTC", "CD", "HYP"]
     spec_classes = ["AFIB", "AFLT", "SVPB", "PVC", "SVTA", "VTA"]
     target_class_name = spec_classes[target_class_idx]
-    
-    # 임상 소견 생성 로직
-    findings = []
-    if main_probs[0] > 0.5:
-        findings.append("정상 동리듬(Normal Sinus Rhythm) 가능성 높음")
-    
-    for i, (cls, prob) in enumerate(zip(main_classes[1:], main_probs[1:])):
-        if prob > 0.5:
-            desc = {"MI": "심근경색(Myocardial Infarction)", "STTC": "ST/T파 변화", 
-                    "CD": "전도 장애(Conduction Disturbance)", "HYP": "비대(Hypertrophy)"}
-            findings.append(f"{desc.get(cls, cls)} 의심")
+    # 임상 소견 생성 로직 (세밀화 버전)
+    findings_high = []    # 확률 > 0.7 (강한 소견)
+    findings_medium = []  # 확률 0.4 ~ 0.7 (의심 소견)
+    findings_low = []     # 확률 0.2 ~ 0.4 (관찰 필요)
+
+    # 1. 일반 진단 (PTB-XL) 분류
+    main_desc = {"MI": "심근경색(Myocardial Infarction)", "STTC": "ST/T파 변화", 
+                 "CD": "전도 장애(Conduction Disturbance)", "HYP": "비대(Hypertrophy)"}
+
+    for cls, prob in zip(main_classes[1:], main_probs[1:]):
+        desc = main_desc.get(cls, cls)
+        if prob > 0.7:
+            findings_high.append(f"{desc}: 특징적인 파형 변화가 뚜렷하며 임상적으로 유의함.")
+        elif prob > 0.4:
+            findings_medium.append(f"{desc}: 비정상적 파형 변화가 관찰되어 정밀 확인 요망.")
+        elif prob > 0.2:
+            findings_low.append(f"{desc}: 미세한 변화가 있으나 비특이적일 수 있음.")
+
+    # 2. 부정맥 (Specialist) 분류
+    spec_desc = {"AFIB": "심방세동(Atrial Fibrillation)", "AFLT": "심방조동(Atrial Flutter)",
+                 "SVPB": "상심실성 조기수축", "PVC": "심실성 조기수축",
+                 "SVTA": "상심실성 빈맥", "VTA": "심실성 빈맥"}
 
     for cls, prob in zip(spec_classes, spec_probs_np):
-        if prob > 0.3: # 부정맥은 민감하게 포착
-            desc = {"AFIB": "심방세동(Atrial Fibrillation)", "AFLT": "심방조동(Atrial Flutter)",
-                    "SVPB": "상심실성 조기수축", "PVC": "심실성 조기수축",
-                    "SVTA": "상심실성 빈맥", "VTA": "심실성 빈맥"}
-            findings.append(f"부정맥 확인: {desc.get(cls, cls)} 소견")
+        desc = spec_desc.get(cls, cls)
+        if prob > 0.7:
+            findings_high.append(f"부정맥: {desc} 가능성이 매우 높으며 즉각적인 임상 대응 고려.")
+        elif prob > 0.4:
+            findings_medium.append(f"부정맥: {desc} 의심 소견. 리듬 모니터링 필요.")
+        elif prob > 0.2:
+            findings_low.append(f"부정맥: {desc} 가능성을 완전히 배제할 수 없음 (감별 진단).")
+
+    # 리포트 텍스트 구성
 
     # 4단계: LLM 연계 서술형 리포트 생성
-    llm_narrative = generate_llm_report(record_id, findings, clinical_reasons, rr_metrics)
+    all_findings = findings_high + findings_medium + findings_low
+    llm_narrative = generate_llm_report(record_id, all_findings, clinical_reasons, rr_metrics)
 
     # 리포트 텍스트 구성
     report_lines = []
@@ -301,11 +317,21 @@ def run_diagnosis():
     report_lines.append("-" * 50)
 
     report_lines.append(" [3. 종합 판독 소견 (Clinical Impression)]")
-    if findings:
-        for i, find in enumerate(findings):
-            report_lines.append(f"  {i+1}. {find}")
-    else:
-        report_lines.append("  - 특이 소견 없음")
+    
+    report_lines.append("  <주요 소견 (High Confidence)>")
+    if findings_high:
+        for f in findings_high: report_lines.append(f"   ● {f}")
+    else: report_lines.append("   - 해당 없음")
+    
+    report_lines.append("\n  <참고 소견 (Medium Confidence)>")
+    if findings_medium:
+        for f in findings_medium: report_lines.append(f"   ○ {f}")
+    else: report_lines.append("   - 해당 없음")
+    
+    report_lines.append("\n  <미세 소견 및 감별 진단 (Low Confidence)>")
+    if findings_low:
+        for f in findings_low: report_lines.append(f"   △ {f}")
+    else: report_lines.append("   - 해당 없음")
     report_lines.append("-" * 50)
 
     report_lines.append(" [4. 의학적 추론 및 근거 (Clinical Reasoning)]")
