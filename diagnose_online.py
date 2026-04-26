@@ -174,9 +174,16 @@ def generate_llm_report(record_id, findings, clinical_reasons, rr_metrics, main_
     
     # [Option A] 실제 Gemini API 연동 (환경변수 있을 때)
     api_key = os.getenv("GEMINI_API_KEY")
-    if False: # api_key and api_key.strip() and api_key != "YOUR_GEMINI_API_KEY":
-        # ... 실제 API 호출 로직 ...
-        pass
+    if api_key and api_key.strip() and api_key != "YOUR_GEMINI_API_KEY":
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            full_prompt = f"{system_instruction}\n\n분석 대상 데이터 JSON:\n{json.dumps(data_context, ensure_ascii=False)}"
+            response = model.generate_content(full_prompt)
+            return f"[실제 Gemini API 추론 결과]\n" + response.text
+        except Exception:
+            pass
 
     # [Option B] 로컬 Gemma 2B/9B 연동 (Ollama API 사용)
     # 보안이 중요한 병원 내부 서버 환경에서 사용
@@ -191,7 +198,7 @@ def generate_llm_report(record_id, findings, clinical_reasons, rr_metrics, main_
                 "prompt": prompt_content,
                 "stream": False
             },
-            timeout=30 # CPU 구동 시 응답 시간을 고려하여 넉넉히 설정
+            timeout=120 # CPU 구동 시 응답 시간을 고려하여 충분히 설정
         )
         if response.status_code == 200:
             return f"[로컬 Gemma 모델 추론 결과]\n" + response.json().get("response", "")
@@ -199,9 +206,9 @@ def generate_llm_report(record_id, findings, clinical_reasons, rr_metrics, main_
         # 로컬 엔진이 꺼져 있거나 연결 실패 시 시뮬레이션 리포트로 대체
         pass
 
-    # 시뮬레이션된 고도화된 리포트 (Phase 1 결과물)
+    # 시뮬레이션된 고도화된 리포트 (Fallback)
     narrative = f"""
-[Gemini Med 추론 엔진 분석 결과 - Record {record_id}]
+[Gemini Med 추론 엔진 분석 결과 (시뮬레이션) - Record {record_id}]
 
 1. 환자 상태 요약 및 임상적 추론:
 본 환자는 평균 심박수 {rr_metrics['avg_hr']:.1f} BPM의 서맥(Bradycardia) 기저 리듬을 보이고 있습니다. 
