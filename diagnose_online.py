@@ -169,13 +169,35 @@ def generate_llm_report(record_id, findings, clinical_reasons, rr_metrics, main_
         "rule_based_reasoning": clinical_reasons
     }
 
-    # 3. 실제 API 호출 시뮬레이션 (API 키가 없을 경우)
-    # 실제 구현 시: response = model.generate_content(prompt)
+    # 3. 실제 API 호출 (1: 클라우드 Gemini, 2: 로컬 Gemma)
+    import requests
     
+    # [Option A] 실제 Gemini API 연동 (환경변수 있을 때)
     api_key = os.getenv("GEMINI_API_KEY")
-    # 데모를 위해 시뮬레이션 리포트를 우선 출력하도록 설정 (실제 연동 시 아래 조건을 활성화)
     if False: # api_key and api_key.strip() and api_key != "YOUR_GEMINI_API_KEY":
-        return "[실제 Gemini Med API를 호출하여 생성된 리포트가 여기에 표시됩니다.]"
+        # ... 실제 API 호출 로직 ...
+        pass
+
+    # [Option B] 로컬 Gemma 2B/9B 연동 (Ollama API 사용)
+    # 보안이 중요한 병원 내부 서버 환경에서 사용
+    try:
+        ollama_url = "http://localhost:11434/api/generate"
+        prompt_content = f"{system_instruction}\n\n분석 대상 데이터 JSON:\n{json.dumps(data_context, ensure_ascii=False)}"
+        
+        response = requests.post(
+            ollama_url,
+            json={
+                "model": "gemma2:2b", # 사양에 따라 gemma2:9b로 변경 가능
+                "prompt": prompt_content,
+                "stream": False
+            },
+            timeout=30 # CPU 구동 시 응답 시간을 고려하여 넉넉히 설정
+        )
+        if response.status_code == 200:
+            return f"[로컬 Gemma 모델 추론 결과]\n" + response.json().get("response", "")
+    except Exception:
+        # 로컬 엔진이 꺼져 있거나 연결 실패 시 시뮬레이션 리포트로 대체
+        pass
 
     # 시뮬레이션된 고도화된 리포트 (Phase 1 결과물)
     narrative = f"""
