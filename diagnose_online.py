@@ -7,6 +7,7 @@ import os
 import sys
 import urllib.request
 from datetime import datetime
+from scipy.signal import find_peaks
 
 # Grad-CAM 기능을 위한 전역 변수
 activations = None
@@ -78,6 +79,38 @@ def preprocess_signal(signal):
     normalized = (signal - means) / stds
     # 모델 입력 형태: (1, 12, 1000)
     return torch.tensor(normalized.T, dtype=torch.float32).unsqueeze(0)
+
+# 3. 신호 분석 함수 (2단계: Signal-to-Feature)
+def analyze_rr_intervals(signal, fs=100):
+    """
+    R-peak를 탐지하고 RR 간격의 통계를 계산합니다.
+    주로 Lead II (보통 index 1) 또는 전반적인 리드를 사용합니다.
+    """
+    # 12리드 중 R-peak가 잘 보이는 리드 선택 (여기선 1번 리드 예시)
+    lead_signal = signal[:, 1]
+    
+    # R-peak 탐지 (임계값 및 거리 설정)
+    # 100Hz 기준, 심박수 200bpm(30 samples) 이상은 드물다고 가정
+    peaks, _ = find_peaks(lead_signal, distance=30, prominence=0.5)
+    
+    if len(peaks) < 2:
+        return None
+
+    # RR 간격 계산 (ms 단위)
+    rr_intervals = np.diff(peaks) * (1000 / fs)
+    avg_hr = 60000 / np.mean(rr_intervals)
+    
+    # RR 간격 변동성 (Coefficient of Variation)
+    rr_std = np.std(rr_intervals)
+    rr_mean = np.mean(rr_intervals)
+    rr_cv = (rr_std / rr_mean) * 100 # % 단위
+    
+    return {
+        "peaks": peaks,
+        "avg_hr": avg_hr,
+        "rr_cv": rr_cv,
+        "intervals": rr_intervals
+    }
 
 # 3. 데이터 다운로드 및 진단 실행
 def run_diagnosis():
@@ -152,6 +185,9 @@ def run_diagnosis():
             combined_heatmap
         )
 
+    # 2단계: 신호 정량 분석 추가
+    rr_metrics = analyze_rr_intervals(signal, fs=100)
+
     spec_probs_np = spec_probs.detach().cpu().numpy()[0]
     
     # 결과 해석 및 리포트 생성
@@ -184,17 +220,28 @@ def run_diagnosis():
     report_lines.append("="*50)
     report_lines.append(f" [데이터 정보] Record ID: {record_id}_lr")
     report_lines.append(f" [분석 시간] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (KST)")
-    report_lines.append("-"*50)
+    report_lines.append("-" * 50)
     
-    report_lines.append(" [1. 종합 판독 소견 (Clinical Impression)]")
+    # 2단계 수치 정보 추가
+    report_lines.append(" [1. 신호 정량 분석 (Signal Metrics)]")
+    if rr_metrics:
+        report_lines.append(f"  - 평균 심박수: {rr_metrics['avg_hr']:.1f} BPM")
+        report_lines.append(f"  - RR 간격 변동률(CV): {rr_metrics['rr_cv']:.2f}%")
+        status = "불규칙(Irregular)" if rr_metrics['rr_cv'] > 15 else "규칙(Regular)"
+        report_lines.append(f"  - 리듬 상태: {status}")
+    else:
+        report_lines.append("  - R-peak 탐지 실패 (분석 불가)")
+    report_lines.append("-" * 50)
+
+    report_lines.append(" [2. 종합 판독 소견 (Clinical Impression)]")
     if findings:
         for i, find in enumerate(findings):
             report_lines.append(f"  {i+1}. {find}")
     else:
         report_lines.append("  - 특이 소견 없음")
-    report_lines.append("-"*50)
+    report_lines.append("-" * 50)
 
-    report_lines.append(" [2. 상세 진단 데이터]")
+    report_lines.append(" [3. 상세 진단 데이터]")
     report_lines.append("  <일반 진단 (PTB-XL 5개 대분류)>")
     for cls, prob in zip(main_classes, main_probs):
         indicator = "🔴" if prob > 0.5 else "⚪"
@@ -204,14 +251,14 @@ def run_diagnosis():
     for cls, prob in zip(spec_classes, spec_probs_np):
         indicator = "🔶" if prob > 0.3 else "⚪"
         report_lines.append(f"   {indicator} {cls:5}: {prob*100:6.2f}%")
-    report_lines.append("-"*50)
+    report_lines.append("-" * 50)
 
-    report_lines.append(f" [3. XAI 분석 (Grad-CAM)]")
+    report_lines.append(f" [4. XAI 분석 (Grad-CAM)]")
     report_lines.append(f"  - 타겟 클래스: {target_class_name}")
     report_lines.append(f"  - 이미지('ecg_plot.png')의 붉은 하이라이트 구간이 {target_class_name} 판독의 주요 근거임.")
-    report_lines.append("-"*50)
+    report_lines.append("-" * 50)
 
-    report_lines.append(" [4. 의학적 주의사항]")
+    report_lines.append(" [5. 의학적 주의사항]")
     report_lines.append("  ※ 본 리포트는 AI 모델의 분석 결과이며 전문의의 최종 판독을")
     report_lines.append("     대체할 수 없습니다. 임상적 결정 전 반드시 전문가와 상의하십시오.")
     report_lines.append("="*50)
@@ -223,11 +270,15 @@ def run_diagnosis():
         f.write(report_text)
     print(f"\n📄 진단 리포트가 'diagnosis_report.txt'로 저장되었습니다.")
 
-    # 4. 시각화 (Grad-CAM 포함)
+    # 4. 시각화 (Grad-CAM 및 R-peak 표시)
     plt.figure(figsize=(12, 8))
     for i in range(3):
         ax = plt.subplot(3, 1, i+1)
         ax.plot(signal[:, i], color='black', linewidth=0.8, label=f'Lead {record.sig_name[i]}')
+        
+        # R-peak 표시 (주로 리드 II인 1번 인덱스에 표시)
+        if rr_metrics and i == 1:
+            ax.plot(rr_metrics['peaks'], signal[rr_metrics['peaks'], i], "ro", markersize=4, label='R-peak')
         
         # Grad-CAM 히트맵 오버레이
         for j in range(len(heatmap_interp)-1):
