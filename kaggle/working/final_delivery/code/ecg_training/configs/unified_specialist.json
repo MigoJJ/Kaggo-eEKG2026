@@ -1,0 +1,62 @@
+{
+  "seed": 42,
+  "output_root": "runs/unified",
+  "dataset": {
+    "root_dirs": [
+      "/kaggle/input/datasets/gamalasran/physionet-challenge-2020",
+      "/kaggle/input/datasets/marufhs/cpsc-2020",
+      "/kaggle/input/datasets/bjoernjostein/ischemia-dataset",
+      "/kaggle/input/datasets/bjoernjostein/shaoxing-and-ningbo-first-hospital-database",
+      "/kaggle/input/datasets/organizations/physionet"
+    ],
+    "label_mapping": {
+      "164889003": "AF",
+      "AFIB": "AF",
+      "164890007": "AFL",
+      "AFLT": "AFL",
+      "427172004": "PVC",
+      "PVC": "PVC",
+      "284470004": "PAC",
+      "SVPB": "PAC",
+      "426783006": "SNR",
+      "NORM": "SNR",
+      "164909002": "STC",
+      "STD": "STC",
+      "STE": "STC"
+    },
+    "sample_rate": 500,
+    "duration_seconds": 10,
+    "normalization": "zscore_per_lead",
+    "val_split": 0.1,
+    "test_split": 0.1
+  },
+  "augmentation": {
+    "enabled": true,
+    "gaussian_noise": { "std": 0.01 },
+    "baseline_wander": { "amp": 0.1, "freq": 0.5 },
+    "random_crop": { "enabled": false }
+  },
+  "model": {
+    "input_leads": 12,
+    "embedding_dim": 256,
+    "blocks": [2, 2, 2, 2],
+    "base_channels": 32,
+    "dropout": 0.3
+  },
+  "loss": {
+    "type": "bce",
+    "use_pos_weight": false
+  },
+  "optimization": {
+    "epochs": 50,
+    "batch_size": 64,
+    "lr": 0.0001,
+    "weight_decay": 0.0001,
+    "num_workers": 4,
+    "grad_clip_norm": 1.0
+  },
+  "thresholds": {
+    "method": "max_f1",
+    "num_steps": 50
+  }
+}

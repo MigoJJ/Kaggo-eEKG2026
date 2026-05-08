@@ -1,0 +1,2 @@
+epoch,train_loss,val_macro_pr_auc,val_macro_roc_auc,val_macro_f1,val_macro_recall,learning_rate
+1,0.617447,0.287540,0.418056,0.217316,0.600000,0.00000000

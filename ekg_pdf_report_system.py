@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import sqlite3
 from datetime import datetime
-from ecg_digitizer_proto import process_ecg_document
+from signal_restoration import ECGDigitizerV2, get_digitizer_disclaimer
 from diagnose_online import load_models, preprocess_signal, analyze_rr_intervals, get_clinical_reasoning, generate_llm_report
 
 def save_to_db(db_path, data):
@@ -41,10 +41,22 @@ def save_to_db(db_path, data):
 def run_pdf_clinical_workflow(pdf_path):
     print(f"\n🚀 Starting Clinical Workflow for: {os.path.basename(pdf_path)}")
     
-    # 1. PDF에서 12리드 디지털 신호 추출
+    # 1. PDF에서 12리드 디지털 신호 추출 (V2 Pipeline)
     try:
-        multi_lead_signal = process_ecg_document(pdf_path) # (1000, 12)
-        print(f"✅ Digitization Complete. Signal shape: {multi_lead_signal.shape}")
+        digitizer = ECGDigitizerV2()
+        multi_lead_signal, q_score = digitizer.process(pdf_path) # (1000, 12), dict
+        print(f"✅ Digitization Complete. Overall Confidence: {q_score['overall_confidence']:.2f}")
+        
+        # 품질 점수 출력
+        print(f"   - Lead Labels Detected: {q_score['lead_labels_detected']}/12")
+        print(f"   - Grid Calibration: {q_score['grid_calibration']}")
+        print(f"   - Skew Detected: {q_score['skew_detected']:.2f}°")
+        
+        # 품질 미달 시 차단
+        if q_score['overall_confidence'] < 0.5:
+            print("⚠️ Digitization quality too low for AI inference. Workflow stopped.")
+            return
+            
     except Exception as e:
         print(f"❌ Digitization Failed: {e}")
         return
@@ -63,27 +75,27 @@ def run_pdf_clinical_workflow(pdf_path):
     # 3. 정량 지표 분석
     rr_metrics = analyze_rr_intervals(multi_lead_signal, fs=100)
 
-    # 4. 임상 소견 및 추론
-    main_classes = ["NORM", "MI", "STTC", "CD", "HYP"]
-    spec_classes = ["AFIB", "AFLT", "SVPB", "PVC", "SVTA", "VTA"]
-    findings_high = []
-    for cls, prob in zip(main_classes[1:], main_probs[1:]):
-        if prob > 0.7: findings_high.append(f"{cls} 의심 (강함)")
-    for cls, prob in zip(spec_classes, spec_probs_np):
-        if prob > 0.7: findings_high.append(f"부정맥: {cls} 가능성 높음")
-    clinical_reasons = get_clinical_reasoning(main_probs, spec_probs_np, rr_metrics)
+    # 4. 임상 소견 및 추론 (구조화된 JSON 생성)
+    thresholds = {"MI": 0.5, "AFIB": 0.3} # Example thresholds
+    structured_findings = get_clinical_reasoning(main_probs, spec_probs_np, rr_metrics, thresholds)
 
-    # 5. 로컬 AI(Gemma) 판독 초안 생성
+    # 5. 로컬 AI(Gemma) 판독 초안 생성 (EMR 요약)
     report_id = os.path.basename(pdf_path)
-    llm_draft = generate_llm_report(
-        report_id, findings_high, clinical_reasons, rr_metrics, main_probs, spec_probs_np
-    )
+    llm_draft = generate_llm_report(report_id, structured_findings)
 
-    # 6. 결과 출력 및 저장
+    # 6. 실험적 연구 고지 및 품질 지표 추가
+    disclaimer = get_digitizer_disclaimer()
+    quality_report = f"\n[DIGITIZATION QUALITY REPORT]\n"
+    for k, v in q_score.items():
+        quality_report += f" - {k}: {v}\n"
+    
+    final_report = disclaimer + quality_report + "\n" + llm_draft
+
+    # 7. 결과 출력 및 저장
     print("\n" + "="*50)
-    print("      DIGITIZED 12-LEAD ECG CLINICAL REPORT")
+    print("      DIGITIZED 12-LEAD ECG CLINICAL REPORT (V2)")
     print("="*50)
-    print(llm_draft)
+    print(final_report)
     print("-" * 50)
     
     # DB 및 파일 저장
@@ -91,14 +103,14 @@ def run_pdf_clinical_workflow(pdf_path):
         'filename': report_id,
         'avg_hr': rr_metrics['avg_hr'] if rr_metrics else 0,
         'rr_cv': rr_metrics['rr_cv'] if rr_metrics else 0,
-        'findings': findings_high,
-        'report_text': llm_draft
+        'findings': [f["Finding"] for f in structured_findings["Emergency"] + structured_findings["High-Risk"]],
+        'report_text': final_report
     }
     save_to_db("ecg_history.db", db_data)
     
     output_file = f"{report_id}_analysis.txt"
     with open(output_file, "w", encoding="utf-8") as f:
-        f.write(llm_draft)
+        f.write(final_report)
     print(f"📄 Report saved to: {output_file}")
 
 if __name__ == "__main__":

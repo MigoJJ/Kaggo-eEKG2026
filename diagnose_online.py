@@ -25,12 +25,29 @@ def backward_hook(module, grad_in, grad_out):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CODE_PATH = os.path.join(BASE_DIR, 'kaggle/working/final_delivery/code/ecg_training')
 WEIGHTS_PATH = os.path.join(BASE_DIR, 'kaggle/working/final_delivery/model_weights/best_model.pt')
+THRESHOLDS_PATH = os.path.join(BASE_DIR, 'kaggle/working/final_delivery/model_weights/thresholds.json')
 ARRHYTHMIA_WEIGHTS_PATH = os.path.join(BASE_DIR, 'runs/arrhythmia_specialist/arrhythmia_best.pt')
 
 if CODE_PATH not in sys.path:
     sys.path.append(CODE_PATH)
 
 from ecg_training.models import PTBXLClassifier, ArrhythmiaSpecialist
+
+def load_thresholds():
+    """학습 과정에서 생성된 thresholds.json을 로드합니다."""
+    default_thresholds = {"NORM": 0.5, "MI": 0.5, "STTC": 0.5, "CD": 0.5, "HYP": 0.5}
+    if os.path.exists(THRESHOLDS_PATH):
+        try:
+            import json
+            with open(THRESHOLDS_PATH, 'r') as f:
+                data = json.load(f)
+                print(f"✅ 학습된 임계값 로드 완료: {THRESHOLDS_PATH}")
+                return data.get("thresholds", default_thresholds)
+        except Exception as e:
+            print(f"⚠️ 임계값 로드 실패 ({e}), 기본값(0.5)을 사용합니다.")
+    else:
+        print("💡 thresholds.json이 없어 기본 임계값(0.5)을 사용합니다.")
+    return default_thresholds
 
 def load_models():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -113,121 +130,137 @@ def analyze_rr_intervals(signal, fs=100):
     }
 
 # 4. 의학적 지식 베이스 기반 추론 엔진 (3단계: Knowledge Base & Template)
-def get_clinical_reasoning(main_probs, spec_probs, rr_metrics):
+def get_clinical_reasoning(main_probs, spec_probs, rr_metrics, thresholds):
     """
-    AI 확률값과 정량적 지표를 결합하여 의학적 근거가 포함된 설명문을 생성합니다.
+    AI 확률값과 정량적 지표를 결합하여 구조화된 의학적 근거를 생성합니다.
     """
-    reasons = []
-    
-    # 심방세동(AFIB) 추론 로직
-    if spec_probs[0] > 0.3:
-        if rr_metrics and rr_metrics['rr_cv'] > 15:
-            reasons.append("심방세동(AFIB): AI가 높은 확률로 탐지했으며, 실제 측정된 RR 간격 변동률이 {:.2f}%로 매우 불규칙하여 임상적으로 일치함.".format(rr_metrics['rr_cv']))
-        else:
-            reasons.append("심방세동(AFIB) 의심: AI는 탐지했으나, 측정된 RR 간격은 규칙적임. P파 소실 여부에 대한 추가 확인이 필요함.")
-
-    # 서맥/빈맥 추론 로직
-    if rr_metrics:
-        if rr_metrics['avg_hr'] < 60:
-            reasons.append("서맥(Bradycardia): 평균 심박수가 {:.1f} BPM으로 정상 범위(60-100)보다 낮음.".format(rr_metrics['avg_hr']))
-        elif rr_metrics['avg_hr'] > 100:
-            reasons.append("빈맥(Tachycardia): 평균 심박수가 {:.1f} BPM으로 정상 범위보다 높음.".format(rr_metrics['avg_hr']))
-
-    # 심근경색(MI) 추론 로직
-    if main_probs[1] > 0.5:
-        reasons.append("심근경색(MI) 의심: AI가 ST-T 파형의 비정상적 변화를 감지함. 효소 검사 및 임상 증상 확인 권장.")
-
-    return reasons
-
-# 5. LLM 연계 리포트 생성 엔진 (4단계: LLM-Linked Report)
-def generate_llm_report(record_id, findings, clinical_reasons, rr_metrics, main_probs, spec_probs):
-    """
-    Gemini Med 모델에 전달할 정교한 프롬프트를 구성하고 추론 결과를 반환합니다.
-    """
-    # 1. 시스템 인스트럭션 (페르소나 및 가이드라인)
-    system_instruction = """
-    당신은 숙련된 심장 전문의를 보조하는 'AI 임상 의사결정 지원 시스템(CDSS)'입니다.
-    제공된 AI 분석 결과와 정량적 신호 지표를 바탕으로 전문적인 임상 리포트를 작성하십시오.
-    작성 시 다음 지침을 준수하십시오:
-    - AI의 수치적 판단과 실제 생체 신호 지표 사이의 일치/불일치 여부를 분석할 것.
-    - AHA/ACC 및 ESC 가이드라인의 의학적 지식을 반영하여 추론할 것.
-    - 단순 나열이 아닌, 환자의 상태를 종합적으로 요약하는 서술형 판독을 제공할 것.
-    - 결과에 따른 구체적인 다음 임상 단계(Next Step)를 제안할 것.
-    """
-
-    # 2. 데이터 구조화 (LLM에 전달할 컨텍스트)
-    data_context = {
-        "record_info": {"id": record_id, "lead_count": 12, "sampling_rate": "100Hz"},
-        "signal_metrics": rr_metrics,
-        "ai_probabilities": {
-            "top_categories": findings,
-            "raw_scores": {
-                "PTBXL_5_classes": main_probs.tolist(),
-                "Arrhythmia_6_classes": spec_probs.tolist()
+    structured_findings = {
+        "Emergency": [],
+        "High-Risk": [],
+        "Non-Urgent": [],
+        "Evidence": {
+            "HR": rr_metrics['avg_hr'] if rr_metrics else "N/A",
+            "RR_CV": rr_metrics['rr_cv'] if rr_metrics else "N/A",
+            "Confidence_Scores": {
+                "MI": float(main_probs[1]),
+                "AFIB": float(spec_probs[0])
             }
         },
-        "rule_based_reasoning": clinical_reasons
+        "Metadata": {
+            "Threshold_Source": "PTB-XL/Arrhythmia Specialist Baseline",
+            "Threshold_Values": thresholds
+        }
+    }
+    
+    # 1. Emergency Findings
+    # (VTA 등은 PTB-XL 데이터셋 부족으로 Specialist에서 제외됨)
+    
+    if rr_metrics and rr_metrics['avg_hr'] < 40:
+        structured_findings["Emergency"].append({
+            "Finding": "심한 서맥(Severe Bradycardia)",
+            "Reason": f"평균 심박수가 {rr_metrics['avg_hr']:.1f} BPM으로 매우 낮아 순환 부전 위험이 있음.",
+            "Confidence": 1.0
+        })
+
+    # 2. High-Risk Findings
+    if main_probs[1] > 0.5: # MI
+        structured_findings["High-Risk"].append({
+            "Finding": "심근경색(MI) 가능성",
+            "Reason": "ST-T 파형의 허혈성 변화가 감지됨. 급성 관상동맥 증후군 배제 필요.",
+            "Confidence": float(main_probs[1])
+        })
+    
+    if spec_probs[0] > 0.3: # AFIB
+        if rr_metrics and rr_metrics['rr_cv'] > 15:
+            structured_findings["High-Risk"].append({
+                "Finding": "심방세동(AFIB)",
+                "Reason": f"AI 탐지 결과와 RR 간격의 불규칙성(CV: {rr_metrics['rr_cv']:.2f}%)이 일치함.",
+                "Confidence": float(spec_probs[0])
+            })
+        else:
+            structured_findings["High-Risk"].append({
+                "Finding": "심방세동(AFIB) 의심",
+                "Reason": "AI는 AFIB를 탐지했으나 RR 간격은 비교적 규칙적임. P파 소실 여부 확인 필요.",
+                "Confidence": float(spec_probs[0])
+            })
+
+    # 3. Non-Urgent Findings
+    if rr_metrics:
+        if 40 <= rr_metrics['avg_hr'] < 60:
+            structured_findings["Non-Urgent"].append({
+                "Finding": "경증 서맥(Mild Bradycardia)",
+                "Reason": "정상 범위보다 다소 낮은 심박수이나 즉각적인 처치는 불필요할 수 있음.",
+                "Confidence": 0.8
+            })
+        elif rr_metrics['avg_hr'] > 100:
+            structured_findings["Non-Urgent"].append({
+                "Finding": "빈맥(Tachycardia)",
+                "Reason": "심박수가 다소 높음. 생리적 요인 또는 긴장 확인 요망.",
+                "Confidence": 0.8
+            })
+
+    return structured_findings
+
+# 5. LLM 연계 리포트 생성 엔진 (4단계: LLM-Linked Report)
+def generate_llm_report(record_id, structured_findings):
+    """
+    구조화된 진단 결과를 바탕으로 EMR 형식의 요약문을 생성합니다.
+    LLM은 새로운 진단을 내리지 않고, 전달된 JSON의 논리적 순서만 정리합니다.
+    """
+    # 1. 시스템 인스트럭션 (제한된 어시스턴트 역할)
+    system_instruction = """
+    당신은 심장 전문의를 보조하여 구조화된 분석 결과를 EMR(Electronic Medical Record) 문장으로 정리하는 어시스턴트입니다.
+    
+    [핵심 지침]
+    1. 제공된 JSON 데이터('structured_findings')에 포함된 소견만 서술하십시오.
+    2. 절대 새로운 진단을 추측하거나 hallucination을 생성하지 마십시오.
+    3. 결과는 전문적이고 건조한 의학적 톤(EMR style)으로 작성하십시오.
+    4. Emergency -> High-Risk -> Non-Urgent 순서로 중요도를 반영하여 요약하십시오.
+    5. 'Evidence' 섹션의 수치(HR, RR_CV)를 소견의 근거로 적절히 인용하십시오.
+    """
+
+    # 2. 데이터 컨텍스트 준비
+    import json
+    data_context = {
+        "record_id": record_id,
+        "structured_findings": structured_findings
     }
 
-    # 3. 실제 API 호출 (1: 클라우드 Gemini, 2: 로컬 Gemma)
-    import requests
+    # 3. LLM API 호출 (생략 가능, 여기서는 프롬프트 구성만 보여줌)
+    # 실제 구현 시 Ollama 또는 Gemini API 사용
     
-    # [Option A] 실제 Gemini API 연동 (환경변수 있을 때)
-    api_key = os.getenv("GEMINI_API_KEY")
-    if api_key and api_key.strip() and api_key != "YOUR_GEMINI_API_KEY":
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            full_prompt = f"{system_instruction}\n\n분석 대상 데이터 JSON:\n{json.dumps(data_context, ensure_ascii=False)}"
-            response = model.generate_content(full_prompt)
-            return f"[실제 Gemini API 추론 결과]\n" + response.text
-        except Exception:
-            pass
+    # 시뮬레이션된 안전한 리포트 (Fallback & Target Style)
+    summary = f"""
+[EMR SUMMARY - RECORD {record_id}]
 
-    # [Option B] 로컬 Gemma 2B/9B 연동 (Ollama API 사용)
-    # 보안이 중요한 병원 내부 서버 환경에서 사용
-    try:
-        ollama_url = "http://localhost:11434/api/generate"
-        prompt_content = f"{system_instruction}\n\n분석 대상 데이터 JSON:\n{json.dumps(data_context, ensure_ascii=False)}"
-        
-        response = requests.post(
-            ollama_url,
-            json={
-                "model": "gemma2:2b", # 사양에 따라 gemma2:9b로 변경 가능
-                "prompt": prompt_content,
-                "stream": False
-            },
-            timeout=120 # CPU 구동 시 응답 시간을 고려하여 충분히 설정
-        )
-        if response.status_code == 200:
-            return f"[로컬 Gemma 모델 추론 결과]\n" + response.json().get("response", "")
-    except Exception:
-        # 로컬 엔진이 꺼져 있거나 연결 실패 시 시뮬레이션 리포트로 대체
-        pass
-
-    # 시뮬레이션된 고도화된 리포트 (Fallback)
-    narrative = f"""
-[Gemini Med 추론 엔진 분석 결과 (시뮬레이션) - Record {record_id}]
-
-1. 환자 상태 요약 및 임상적 추론:
-본 환자는 평균 심박수 {rr_metrics['avg_hr']:.1f} BPM의 서맥(Bradycardia) 기저 리듬을 보이고 있습니다. 
-CNN 백본 모델은 심방세동(AFIB, {spec_probs[0]*100:.1f}%)의 징후를 탐지했으나, 
-정량적 분석 결과 RR 간격의 변동률(CV)이 {rr_metrics['rr_cv']:.2f}%로 매우 규칙적입니다. 
-
-이는 전형적인 AFIB(Irregularly irregular)과는 상충되는 소견으로, 
-'고정된 전도비를 가진 심방조동(AFLT)' 또는 '방실 차단을 동반한 서맥성 리듬' 가능성을 시사합니다. 
-AI가 탐지한 AFIB 징후는 P파의 미세한 떨림이나 기저선의 잡음을 오인했을 가능성이 높으므로 
-파형의 등전위선(Isoelectric line)을 면밀히 재검토할 필요가 있습니다.
-
-2. 의학적 권고 사항 (Guideline-based):
-- 심박수가 50 BPM 미만이므로 혈압 및 어지럼증 등 서맥 관련 증상을 확인하십시오.
-- AI가 시각화한 Grad-CAM 하이라이트 구간에서 P파의 존재 여부와 형태를 육안으로 대조 분석하십시오.
-- 임상적 판단이 불분명할 경우, 장기 리듬 추적을 위한 24시간 홀터 모니터링을 강력히 권장합니다.
-
-[본 리포트는 Med-PaLM 2 / Gemini Med의 프롬프트 프로토콜에 따라 생성되었습니다.]
+1. 주요 소견 및 응급도 (Clinical Impression):
 """
-    return narrative.strip()
+    if structured_findings["Emergency"]:
+        summary += "  - [EMERGENCY]: " + ", ".join([f["Finding"] for f in structured_findings["Emergency"]]) + "\n"
+    if structured_findings["High-Risk"]:
+        summary += "  - [HIGH-RISK]: " + ", ".join([f["Finding"] for f in structured_findings["High-Risk"]]) + "\n"
+    if not (structured_findings["Emergency"] or structured_findings["High-Risk"]):
+        summary += "  - 특이 소견 없음\n"
+
+    summary += f"""
+2. 임상적 근거 (Evidence Based):
+  - 심박수(HR): {structured_findings['Evidence']['HR']} BPM
+  - 리듬 규칙성(RR_CV): {structured_findings['Evidence']['RR_CV']}%
+"""
+    
+    # 상세 서술 (LLM이 할 일의 예시)
+    for cat in ["Emergency", "High-Risk", "Non-Urgent"]:
+        for f in structured_findings[cat]:
+            summary += f"  ● {f['Finding']}: {f['Reason']} (신뢰도: {f['Confidence']:.2f})\n"
+
+    summary += """
+3. 시스템 제약 사항 및 안내 (Disclaimers):
+  - 본 분석은 AI 모델(PTB-XL Backbone + Arrhythmia Specialist)에 의한 자동 판독 결과입니다.
+  - 임계값(Threshold)은 연구용 Baseline을 기준으로 설정되었으며 임상적 절대 기준이 아닙니다.
+  - 데이터 누락, 신호 잡음, 또는 부정확한 디지털 복원으로 인한 판독 오류 가능성이 존재합니다.
+  - 최종 진단 및 치료 결정은 반드시 담당 전문의의 육안 판독과 임상 증상을 종합하여 내려져야 합니다.
+"""
+    return summary.strip()
 
 # 6. 데이터 다운로드 및 진단 실행
 def run_diagnosis():
@@ -307,35 +340,42 @@ def run_diagnosis():
 
     spec_probs_np = spec_probs.detach().cpu().numpy()[0]
     
+    # 임계값 로드 및 적용
+    tuned_thresholds_dict = load_thresholds()
+    main_classes = ["NORM", "MI", "STTC", "CD", "HYP"]
+    # 리스트 형태로 변환 (순서 유지)
+    tuned_thresholds = [tuned_thresholds_dict.get(cls, 0.5) for cls in main_classes]
+
     # 3단계: 지식 베이스 기반 추론 엔진 실행
-    clinical_reasons = get_clinical_reasoning(main_probs, spec_probs_np, rr_metrics)
+    structured_findings = get_clinical_reasoning(main_probs, spec_probs_np, rr_metrics, tuned_thresholds_dict)
 
     # 결과 해석 및 리포트 생성
-    main_classes = ["NORM", "MI", "STTC", "CD", "HYP"]
-    spec_classes = ["AFIB", "AFLT", "SVPB", "PVC", "SVTA", "VTA"]
+    spec_classes = ["AFIB", "AFLT", "PVC"]
     target_class_name = spec_classes[target_class_idx]
-    # 임상 소견 생성 로직 (세밀화 버전)
-    findings_high = []    # 확률 > 0.7 (강한 소견)
-    findings_medium = []  # 확률 0.4 ~ 0.7 (의심 소견)
-    findings_low = []     # 확률 0.2 ~ 0.4 (관찰 필요)
+    
+    # 임상 소견 생성 로직 (Tuned Threshold 기반)
+    findings_high = []    # 임계값 이상 (유의 소견)
+    findings_medium = []  # 임계값의 70% 이상 (의심 소견)
+    findings_low = []     # 그 외 (관찰 필요)
 
     # 1. 일반 진단 (PTB-XL) 분류
     main_desc = {"MI": "심근경색(Myocardial Infarction)", "STTC": "ST/T파 변화", 
                  "CD": "전도 장애(Conduction Disturbance)", "HYP": "비대(Hypertrophy)"}
 
-    for cls, prob in zip(main_classes[1:], main_probs[1:]):
+    for i, (cls, prob) in enumerate(zip(main_classes[1:], main_probs[1:])):
         desc = main_desc.get(cls, cls)
-        if prob > 0.7:
-            findings_high.append(f"{desc}: 특징적인 파형 변화가 뚜렷하며 임상적으로 유의함.")
-        elif prob > 0.4:
-            findings_medium.append(f"{desc}: 비정상적 파형 변화가 관찰되어 정밀 확인 요망.")
+        t = tuned_thresholds[i+1] # NORM 제외 index
+        
+        if prob >= t:
+            findings_high.append(f"{desc}: AI 탐지 확률({prob:.2f})이 학습된 임계값({t:.2f})을 상과하여 유의함.")
+        elif prob >= t * 0.7:
+            findings_medium.append(f"{desc}: 임계값 부근({prob:.2f}/{t:.2f})의 변화가 관찰되어 정밀 확인 요망.")
         elif prob > 0.2:
-            findings_low.append(f"{desc}: 미세한 변화가 있으나 비특이적일 수 있음.")
+            findings_low.append(f"{desc}: 미세한 변화({prob:.2f})가 있으나 비특이적일 수 있음.")
 
     # 2. 부정맥 (Specialist) 분류
     spec_desc = {"AFIB": "심방세동(Atrial Fibrillation)", "AFLT": "심방조동(Atrial Flutter)",
-                 "SVPB": "상심실성 조기수축", "PVC": "심실성 조기수축",
-                 "SVTA": "상심실성 빈맥", "VTA": "심실성 빈맥"}
+                 "PVC": "심실성 조기수축"}
 
     for cls, prob in zip(spec_classes, spec_probs_np):
         desc = spec_desc.get(cls, cls)
@@ -349,8 +389,7 @@ def run_diagnosis():
     # 리포트 텍스트 구성
 
     # 4단계: LLM 연계 서술형 리포트 생성
-    all_findings = findings_high + findings_medium + findings_low
-    llm_narrative = generate_llm_report(record_id, all_findings, clinical_reasons, rr_metrics, main_probs, spec_probs_np)
+    llm_narrative = generate_llm_report(record_id, structured_findings)
 
     # 리포트 텍스트 구성
     report_lines = []
@@ -394,9 +433,11 @@ def run_diagnosis():
     report_lines.append("-" * 50)
 
     report_lines.append(" [4. 의학적 추론 및 근거 (Clinical Reasoning)]")
-    if clinical_reasons:
-        for i, reason in enumerate(clinical_reasons):
-            report_lines.append(f"  ● {reason}")
+    # structured_findings에서 가져오기
+    all_reasons = structured_findings["Emergency"] + structured_findings["High-Risk"] + structured_findings["Non-Urgent"]
+    if all_reasons:
+        for f in all_reasons:
+            report_lines.append(f"  ● {f['Finding']}: {f['Reason']}")
     else:
         report_lines.append("  - 추가적인 추론 근거 없음")
     report_lines.append("-" * 50)
@@ -455,6 +496,10 @@ def run_diagnosis():
     plt.tight_layout()
     plt.savefig('ecg_plot.png')
     print(f"📈 Grad-CAM 분석 결과가 포함된 ECG 파형이 'ecg_plot.png'로 저장되었습니다.")
+
+if __name__ == "__main__":
+    run_diagnosis()
+AM 분석 결과가 포함된 ECG 파형이 'ecg_plot.png'로 저장되었습니다.")
 
 if __name__ == "__main__":
     run_diagnosis()

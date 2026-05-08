@@ -121,34 +121,51 @@ class PTBXLClassifier(nn.Module):
 
 class ArrhythmiaSpecialist(nn.Module):
     """
-    부정맥(AFib, PVC 등) 정밀 진단을 위한 하이브리드 모델.
-    기존 CNN 특징 추출기에 RNN(LSTM)을 결합하여 시간적 불규칙성을 포착합니다.
+    부정맥 정밀 진단을 위한 하이브리드 모델.
+    1. Signal Backbone: 전체적인 리듬 특징 추출 (seq_len, feat_dim)
+    2. Beat Features: 심박별 분류 결과(N, S, V, F, Q counts/probs)를 입력받아 융합
     """
-    def __init__(self, backbone, embedding_dim=256, num_arrhythmia_classes=6, dropout=0.3):
+    def __init__(self, backbone, feat_dim=256, num_beat_classes=5, num_arrhythmia_classes=3, dropout=0.3):
         super().__init__()
         self.backbone = backbone
-        # backbone의 최종 채널 수 (base_channels * 2^3 = 32 * 8 = 256)
-        # LeadEncoder1D의 self.layers를 거친 후의 채널 수입니다.
-        lstm_input_dim = 256 
         
-        self.lstm = nn.LSTM(input_size=lstm_input_dim, hidden_size=128, num_layers=2, 
+        # LSTM for rhythm pattern
+        self.lstm = nn.LSTM(input_size=feat_dim, hidden_size=128, num_layers=2, 
                             batch_first=True, bidirectional=True, dropout=dropout)
         
-        self.specialized_head = nn.Sequential(
-            nn.Linear(128 * 2, 64),
+        # Beat feature projection (counts or aggregated probs of beats)
+        self.beat_proj = nn.Sequential(
+            nn.Linear(num_beat_classes, 64),
+            nn.GELU(),
+            nn.Dropout(dropout)
+        )
+        
+        self.final_head = nn.Sequential(
+            nn.Linear(128 * 2 + 64, 128),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(64, num_arrhythmia_classes)
+            nn.Linear(128, num_arrhythmia_classes)
         )
 
-    def forward(self, signal):
+    def forward(self, signal, beat_features=None):
         # signal: (batch, leads, length)
-        # 백본에서 시퀀스 특징 추출: (batch, seq_len, feat_dim)
-        seq_features = self.backbone(signal, return_sequence=True)
+        # beat_features: (batch, num_beat_classes) - e.g. counts or mean probs of beats in the signal
         
+        # 1. Rhythm features from sequence
+        seq_features = self.backbone(signal, return_sequence=True)
         lstm_out, _ = self.lstm(seq_features)
-        # 마지막 타임스텝의 출력을 사용하여 분류
-        logits = self.specialized_head(lstm_out[:, -1, :])
+        rhythm_feat = lstm_out[:, -1, :] # (batch, 128 * 2)
+        
+        # 2. Beat features fusion
+        if beat_features is None:
+            # Placeholder if not provided
+            beat_features = torch.zeros(signal.shape[0], 5).to(signal.device)
+            
+        beat_feat = self.beat_proj(beat_features)
+        
+        # 3. Combined classification
+        combined = torch.cat([rhythm_feat, beat_feat], dim=1)
+        logits = self.final_head(combined)
         return logits
 
 

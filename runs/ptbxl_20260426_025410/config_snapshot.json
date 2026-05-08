@@ -1,0 +1,88 @@
+{
+  "seed": 42,
+  "output_root": "runs",
+  "archives": {
+    "ptbxl_zip": "ptb-xl.zip",
+    "extract_root": "data/raw"
+  },
+  "dataset": {
+    "sample_rate": 100,
+    "duration_seconds": 10,
+    "superclasses": [
+      "NORM",
+      "MI",
+      "STTC",
+      "CD",
+      "HYP"
+    ],
+    "train_folds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "val_folds": [
+      9
+    ],
+    "test_folds": [
+      10
+    ],
+    "use_weighted_sampler": true,
+    "normalization": "zscore_per_lead"
+  },
+  "augmentation": {
+    "enabled": true,
+    "noise_std": 0.01,
+    "baseline_wander_std": 0.03,
+    "amplitude_scale_range": [
+      0.95,
+      1.05
+    ],
+    "time_shift_samples": 20,
+    "lead_dropout_prob": 0.03,
+    "time_mask_prob": 0.15,
+    "time_mask_max_width": 40
+  },
+  "model": {
+    "input_leads": 12,
+    "embedding_dim": 256,
+    "blocks": [
+      2,
+      2,
+      2,
+      2
+    ],
+    "base_channels": 32,
+    "dropout": 0.2,
+    "pretrained_encoder_path": null
+  },
+  "optimization": {
+    "epochs": 1,
+    "batch_size": 32,
+    "lr": 0.0003,
+    "weight_decay": 0.0001,
+    "num_workers": 4,
+    "patience": 7,
+    "grad_clip_norm": 1.0
+  },
+  "loss": {
+    "name": "weighted_bce",
+    "label_smoothing": 0.0
+  },
+  "thresholds": {
+    "search_grid": [
+      0.05,
+      0.95,
+      0.01
+    ],
+    "default_strategy": "f1",
+    "critical_classes": {
+      "MI": "f2",
+      "CD": "f2"
+    }
+  }
+}

@@ -43,7 +43,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # 1. 데이터 로드 (부정맥 6종 필터링)
+    # 1. 데이터 로드 (부정맥 3종 필터링: AFIB, AFLT, PVC)
     print("📦 부정맥 특화 데이터 로딩 중...")
     # 데이터 경로가 압축 해제된 상태여야 함
     try:

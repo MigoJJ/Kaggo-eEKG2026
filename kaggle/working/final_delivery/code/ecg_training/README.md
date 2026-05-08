@@ -178,6 +178,16 @@ This saves a beat encoder checkpoint you can reuse in PTB-XL config:
 }
 ```
 
+## Phase 3: Unified Specialist Training
+
+Train on multiple datasets (PhysioNet 2020, CPSC 2020, PTB-XL, etc.) using unified SNOMED-CT label mapping.
+
+```bash
+python -m ecg_training.train_unified --config ecg_training/configs/unified_specialist.json --device cuda --amp
+```
+
+This phase combines data from various sources to create a more robust foundation model for ECG diagnosis.
+
 ## Operating principles
 
 - Model selection is based on `macro_pr_auc`
