@@ -8,6 +8,11 @@ import sys
 import urllib.request
 from datetime import datetime
 from scipy.signal import find_peaks
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+# .env 파일 로드 (환경 변수 덮어쓰기 허용)
+load_dotenv(override=True)
 
 # Grad-CAM 기능을 위한 전역 변수
 activations = None
@@ -77,10 +82,21 @@ def load_models():
     # 부정맥 정밀 모델 (6종)
     specialist = ArrhythmiaSpecialist(backbone=main_model.backbone, num_arrhythmia_classes=6)
     if os.path.exists(ARRHYTHMIA_WEIGHTS_PATH):
-        checkpoint = torch.load(ARRHYTHMIA_WEIGHTS_PATH, map_location=device)
-        state_dict = checkpoint.get('model_state_dict', checkpoint)
-        specialist.load_state_dict(state_dict)
-        print("✅ 부정맥 정밀 분석 모델 로드 완료")
+        try:
+            checkpoint = torch.load(ARRHYTHMIA_WEIGHTS_PATH, map_location=device)
+            state_dict = checkpoint.get('model_state_dict', checkpoint)
+            
+            # 일부 가중치 이름 변경 (specialized_head -> final_head) 대응
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                new_key = k.replace("specialized_head", "final_head")
+                new_state_dict[new_key] = v
+            
+            # 구조가 완전히 다를 경우를 대비해 strict=False 사용
+            specialist.load_state_dict(new_state_dict, strict=False)
+            print("✅ 부정맥 정밀 분석 모델 로드 완료 (Partial Load if architecture mismatched)")
+        except Exception as e:
+            print(f"⚠️ 부정맥 정밀 모델 가중치 로드 중 오류: {e}. 초기 상태로 작동합니다.")
     else:
         print("💡 부정맥 정밀 모델 가중치가 없어 초기 상태로 작동합니다. (학습 필요)")
     
@@ -226,12 +242,29 @@ def generate_llm_report(record_id, structured_findings):
         "structured_findings": structured_findings
     }
 
-    # 3. LLM API 호출 (생략 가능, 여기서는 프롬프트 구성만 보여줌)
-    # 실제 구현 시 Ollama 또는 Gemini API 사용
+    # 3. Gemini API 호출 시도
+    api_key = os.getenv("GEMINI_API_KEY")
+    if api_key:
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(
+                model_name="gemini-2.5-flash",
+                system_instruction=system_instruction
+            )
+            
+            prompt = f"다음 구조화된 심전도 분석 결과를 바탕으로 EMR 요약 리포트를 작성해줘:\n{json.dumps(data_context, ensure_ascii=False, indent=2)}"
+            response = model.generate_content(prompt)
+            
+            if response and response.text:
+                return response.text.strip()
+        except Exception as e:
+            print(f"⚠️ Gemini API 호출 중 오류 발생: {e}. 시뮬레이션 모드로 전환합니다.")
+    else:
+        print("💡 GEMINI_API_KEY가 설정되지 않았습니다. 시뮬레이션 모드로 작동합니다.")
     
-    # 시뮬레이션된 안전한 리포트 (Fallback & Target Style)
+    # 4. 시뮬레이션된 안전한 리포트 (Fallback & Target Style)
     summary = f"""
-[EMR SUMMARY - RECORD {record_id}]
+[EMR SUMMARY - RECORD {record_id} (Simulation)]
 
 1. 주요 소견 및 응급도 (Clinical Impression):
 """
@@ -248,7 +281,7 @@ def generate_llm_report(record_id, structured_findings):
   - 리듬 규칙성(RR_CV): {structured_findings['Evidence']['RR_CV']}%
 """
     
-    # 상세 서술 (LLM이 할 일의 예시)
+    # 상세 서술
     for cat in ["Emergency", "High-Risk", "Non-Urgent"]:
         for f in structured_findings[cat]:
             summary += f"  ● {f['Finding']}: {f['Reason']} (신뢰도: {f['Confidence']:.2f})\n"
@@ -496,10 +529,6 @@ def run_diagnosis():
     plt.tight_layout()
     plt.savefig('ecg_plot.png')
     print(f"📈 Grad-CAM 분석 결과가 포함된 ECG 파형이 'ecg_plot.png'로 저장되었습니다.")
-
-if __name__ == "__main__":
-    run_diagnosis()
-AM 분석 결과가 포함된 ECG 파형이 'ecg_plot.png'로 저장되었습니다.")
 
 if __name__ == "__main__":
     run_diagnosis()

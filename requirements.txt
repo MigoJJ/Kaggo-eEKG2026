@@ -1,0 +1,10 @@
+google-generativeai
+python-dotenv
+torch
+numpy
+wfdb
+matplotlib
+scipy
+streamlit
+plotly
+pandas
