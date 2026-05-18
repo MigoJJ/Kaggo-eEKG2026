@@ -178,3 +178,106 @@ class MITBIHBeatClassifier(nn.Module):
     def forward(self, signal):
         features = self.backbone(signal)
         return self.head(features)
+
+
+class UNet1D(nn.Module):
+    """
+    Step 2: 1D U-Net for QRS Segmentation.
+    이 모델은 신호의 각 샘플이 R-peak에 해당하는지 여부를 0~1 사이의 확률로 출력합니다.
+    """
+    def __init__(self, input_channels=1, num_classes=1, base_filters=16):
+        super().__init__()
+        
+        # Encoder
+        self.enc1 = self._conv_block(input_channels, base_filters)
+        self.pool1 = nn.MaxPool1d(2)
+        self.enc2 = self._conv_block(base_filters, base_filters * 2)
+        self.pool2 = nn.MaxPool1d(2)
+        
+        # Bridge
+        self.bridge = self._conv_block(base_filters * 2, base_filters * 4)
+        
+        # Decoder
+        self.up2 = nn.Upsample(scale_factor=2, mode='linear', align_corners=True)
+        self.dec2 = self._conv_block(base_filters * 6, base_filters * 2)
+        self.up1 = nn.Upsample(scale_factor=2, mode='linear', align_corners=True)
+        self.dec1 = self._conv_block(base_filters * 3, base_filters)
+        
+        self.final = nn.Conv1d(base_filters, num_classes, kernel_size=1)
+        self.sigmoid = nn.Sigmoid()
+
+    def _conv_block(self, in_c, out_c):
+        return nn.Sequential(
+            nn.Conv1d(in_c, out_c, kernel_size=3, padding=1),
+            nn.BatchNorm1d(out_c),
+            nn.ReLU(),
+            nn.Conv1d(out_c, out_c, kernel_size=3, padding=1),
+            nn.BatchNorm1d(out_c),
+            nn.ReLU()
+        )
+
+    def forward(self, x):
+        # x: (batch, 1, length)
+        e1 = self.enc1(x)
+        p1 = self.pool1(e1)
+        e2 = self.enc2(p1)
+        p2 = self.pool2(e2)
+        
+        b = self.bridge(p2)
+        
+        d2 = self.up2(b)
+        # Skip connection match
+        d2 = torch.cat([d2, e2], dim=1)
+        d2 = self.dec2(d2)
+        
+        d1 = self.up1(d2)
+        d1 = torch.cat([d1, e1], dim=1)
+        d1 = self.dec1(d1)
+        
+        return self.sigmoid(self.final(d1))
+
+
+class ArrhythmiaSpecialistV2(nn.Module):
+    """
+    Stage 2 Hybrid V2 Model: Fuses Waveform (CNN) + Clinical Features (MLP).
+    Mimics a cardiologist looking at both the strip and numerical metrics.
+    """
+    def __init__(self, backbone, feature_dim=5, num_classes=5, embedding_dim=256, dropout=0.3):
+        super().__init__()
+        self.backbone = backbone # PTBXL Backbone (CNN)
+        
+        # Clinical Feature Branch (MLP)
+        self.feature_mlp = nn.Sequential(
+            nn.Linear(feature_dim, 64),
+            nn.BatchNorm1d(64),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(64, 64),
+            nn.BatchNorm1d(64),
+            nn.GELU()
+        )
+        
+        # Fusion and Final Classification
+        self.fusion_head = nn.Sequential(
+            nn.Linear(embedding_dim + 64, 128),
+            nn.BatchNorm1d(128),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(128, num_classes)
+        )
+
+    def forward(self, signal, features):
+        # signal: (batch, 12, 1000)
+        # features: (batch, feature_dim)
+        
+        # 1. Waveform encoding
+        wave_feat = self.backbone(signal) # (batch, embedding_dim)
+        
+        # 2. Clinical feature encoding
+        clinic_feat = self.feature_mlp(features) # (batch, 64)
+        
+        # 3. Fusion
+        combined = torch.cat([wave_feat, clinic_feat], dim=1)
+        logits = self.fusion_head(combined)
+        
+        return logits

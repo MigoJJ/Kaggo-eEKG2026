@@ -62,24 +62,27 @@ def run_pdf_clinical_workflow(pdf_path):
         return
 
     # 2. 모델 로드 및 추론
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    main_model, specialist, device = load_models()
-    input_tensor = preprocess_signal(multi_lead_signal).to(device)
-    
-    with torch.no_grad():
-        main_out = main_model(input_tensor)
-        main_probs = torch.sigmoid(main_out).cpu().numpy()[0]
-        spec_out = specialist(input_tensor)
-        spec_probs_np = torch.sigmoid(spec_out).cpu().numpy()[0]
+    models, _, _ = load_models()
+    if 'v2_engine' not in models:
+        print("❌ Model loading failed.")
+        return
 
-    # 3. 정량 지표 분석
-    rr_metrics = analyze_rr_intervals(multi_lead_signal, fs=100)
+    # 3. 정량 지표 분석 및 추론 (analyze_rr_intervals에서 통합 수행)
+    # 내부적으로 Softmax 적용 및 하이브리드 지표(HRV, QRS) 결합 추론 수행
+    rr_metrics = analyze_rr_intervals(multi_lead_signal, fs=100, models=models)
+    
+    if rr_metrics is None:
+        print("❌ Signal analysis failed.")
+        return
+        
+    main_probs = rr_metrics['main_probs']
 
     # 4. 임상 소견 및 추론 (구조화된 JSON 생성)
-    thresholds = {"MI": 0.5, "AFIB": 0.3} # Example thresholds
-    structured_findings = get_clinical_reasoning(main_probs, spec_probs_np, rr_metrics, thresholds)
+    thresholds = load_thresholds()
+    spec_probs_placeholder = np.zeros(6) 
+    structured_findings = get_clinical_reasoning(main_probs, spec_probs_placeholder, rr_metrics, thresholds)
 
-    # 5. 로컬 AI(Gemma) 판독 초안 생성 (EMR 요약)
+    # 5. Gemini AI 판독 리포트 생성
     report_id = os.path.basename(pdf_path)
     llm_draft = generate_llm_report(report_id, structured_findings)
 

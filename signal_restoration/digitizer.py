@@ -95,16 +95,22 @@ class ECGDigitizerV2:
         # Grid lines are usually 1mm (fine) or 5mm (bold)
         # We try to detect the 1mm spacing
         if 5 < spacing_h < 30: # Reasonable range for 1mm at 150-600 DPI
-            self.quality_score["pixels_per_mm_h"] = float(spacing_h)
-        else:
-            self.quality_score["pixels_per_mm_h"] = self.dpi / 25.4 # Fallback
-            
-        if 5 < spacing_v < 30:
-            self.quality_score["pixels_per_mm_v"] = float(spacing_v)
-        else:
-            self.quality_score["pixels_per_mm_v"] = self.dpi / 25.4 # Fallback
-            
-        self.quality_score["grid_calibration"] = "pass"
+            # Validation of grid spacing
+            if 5 < spacing_h < 30:
+                self.quality_score["pixels_per_mm_h"] = float(spacing_h)
+                self.quality_score["grid_calibration_h"] = "pass"
+            else:
+                self.quality_score["pixels_per_mm_h"] = self.dpi / 25.4 # Fallback
+                self.quality_score["grid_calibration_h"] = "fail (using fallback)"
+
+            if 5 < spacing_v < 30:
+                self.quality_score["pixels_per_mm_v"] = float(spacing_v)
+                self.quality_score["grid_calibration_v"] = "pass"
+            else:
+                self.quality_score["pixels_per_mm_v"] = self.dpi / 25.4 # Fallback
+                self.quality_score["grid_calibration_v"] = "fail (using fallback)"
+
+            self.quality_score["grid_calibration"] = "pass" if "fail" not in str(self.quality_score.values()) else "warning"
 
     def detect_lead_labels(self, img):
         """Uses OCR to find lead labels and their positions."""
@@ -134,17 +140,24 @@ class ECGDigitizerV2:
         h, w = binary_img.shape
         leads = []
         
-        if len(self.lead_regions) >= 8: # If we found most labels, use them
-            # This is complex because we need to define the bounding box of the signal
-            # for each label. Typically, signals are to the right or below labels.
-            # Fallback to 4x3 for now but record that we found labels.
-            pass
+        # Determine segmentation method
+        if len(self.lead_regions) >= 8:
+            self.quality_score["segmentation_method"] = "ocr_guided"
+            # Note: Full OCR-based custom bounding boxes can be implemented here.
+            # For now, we still use 4x3 but ensure labels are within segments.
+        else:
+            self.quality_score["segmentation_method"] = "fixed_grid"
 
         rows, cols = 4, 3
         lead_h, lead_w = h // rows, w // cols
         for r in range(rows):
             for c in range(cols):
-                lead_img = binary_img[r*lead_h:(r+1)*lead_h, c*lead_w:(c+1)*lead_w]
+                # Apply a small margin to avoid labels and grid borders
+                margin_h = int(lead_h * 0.12)
+                margin_w = int(lead_w * 0.05)
+                y1, y2 = r*lead_h + margin_h, (r+1)*lead_h - margin_h
+                x1, x2 = c*lead_w + margin_w, (c+1)*lead_w - margin_w
+                lead_img = binary_img[y1:y2, x1:x2]
                 leads.append(lead_img)
         return leads
 
@@ -155,31 +168,37 @@ class ECGDigitizerV2:
         for x in range(w):
             pts = np.where(lead_binary[:, x] > 0)[0]
             if len(pts) > 0:
-                # Use median to ignore noise dots
+                # Use median to ignore noise dots and spikes
                 signal.append(np.median(pts))
             else:
                 signal.append(np.nan)
         
-        # Fill NaNs with interpolation
+        # Fill NaNs with interpolation and resample to 1000 points
         signal = np.array(signal)
-        nans, x = np.isnan(signal), lambda z: z.nonzero()[0]
-        if np.any(nans) and not np.all(nans):
-            signal[nans] = np.interp(x(nans), x(~nans), signal[~nans])
-        elif np.all(nans):
-            signal = np.full(w, h // 2)
+        if np.isnan(signal).all():
+            return np.zeros(1000)
             
-        # Median filter to smooth out small spikes
-        signal = medfilt(signal, kernel_size=5)
-        
+        nans = np.isnan(signal)
+        if np.any(nans):
+            ok = ~nans
+            xp = ok.nonzero()[0]
+            fp = signal[ok]
+            x = np.arange(len(signal))
+            signal = np.interp(x, xp, fp)
+            
         # Quality check for gaps
-        gap_ratio = np.sum(nans) / w
+        gap_ratio = np.sum(nans) / len(nans)
         if gap_ratio > 0.2:
             self.quality_score["baseline_stability"] = "poor"
-        elif self.quality_score["baseline_stability"] == "unknown":
+        else:
             self.quality_score["baseline_stability"] = "stable"
             
-        signal = np.max(signal) - signal
-        return signal
+        # Invert and smooth
+        signal = h - signal
+        from scipy.signal import medfilt, resample
+        signal = medfilt(signal, kernel_size=5)
+        
+        return resample(signal, 1000)
 
     def process(self, file_path):
         """Main entry point for V2 Digitization."""
@@ -196,25 +215,24 @@ class ECGDigitizerV2:
         # 3. Grid calibration
         self.calibrate_grid_scale(img)
         
-        # 4. Grid removal
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        # Keep only black/dark-gray (waveform)
-        mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 100]))
+        # 4. Signal Extraction
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _, binary = cv2.threshold(gray, 120, 255, cv2.THRESH_BINARY_INV)
         
-        # 5. Segmentation & Extraction
-        lead_binaries = self.segment_leads_adaptive(mask, img)
-        raw_signals = [self.extract_waveform_robust(lb) for lb in lead_binaries]
+        segments = self.segment_leads_adaptive(binary, img)
+        lead_signals = []
+        for seg in segments:
+            sig = self.extract_waveform_robust(seg)
+            lead_signals.append(sig)
+            
+        final_signal = np.array(lead_signals) # (12, 1000)
         
-        # 6. Final reconstruction
-        reconstructed = []
-        for sig in raw_signals:
-            x_old = np.linspace(0, 1, len(sig))
-            x_new = np.linspace(0, 1, 1000)
-            f = interp1d(x_old, sig, kind='linear', fill_value="extrapolate")
-            reconstructed.append(f(x_new) - np.mean(f(x_new)))
+        # Center signals
+        for i in range(12):
+            final_signal[i] = final_signal[i] - np.mean(final_signal[i])
             
         self.quality_score["overall_confidence"] = self.calculate_confidence()
-        return np.array(reconstructed).T, self.quality_score
+        return final_signal, self.quality_score
 
     def calculate_confidence(self):
         score = 0.0

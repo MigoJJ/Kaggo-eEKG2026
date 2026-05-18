@@ -10,7 +10,7 @@ import tempfile
 from signal_restoration import ECGDigitizerV2, get_digitizer_disclaimer
 from diagnose_online import (
     load_models, preprocess_signal, analyze_rr_intervals, 
-    get_clinical_reasoning, generate_llm_report
+    get_clinical_reasoning, generate_llm_report, load_thresholds
 )
 
 # 페이지 설정
@@ -97,21 +97,23 @@ def main():
                     multi_lead_signal, q_score = digitizer.process(tmp_path)
                     
                     # 2. 모델 추론
-                    main_model, specialist, device = load_models()
-                    input_tensor = preprocess_signal(multi_lead_signal).to(device)
+                    models, _, device = load_models()
                     
-                    with torch.no_grad():
-                        main_out = main_model(input_tensor)
-                        main_probs = torch.sigmoid(main_out).cpu().numpy()[0]
-                        spec_out = specialist(input_tensor)
-                        spec_probs_np = torch.sigmoid(spec_out).cpu().numpy()[0]
-
-                    # 3. 지표 분석
-                    rr_metrics = analyze_rr_intervals(multi_lead_signal, fs=100)
+                    # 3. 하이브리드 지표 분석 (진단 + 심박수 + 임상지표 동시 처리)
+                    analysis_res = analyze_rr_intervals(multi_lead_signal, fs=100, models=models)
+                    
+                    if analysis_res:
+                        main_probs = analysis_res['main_probs']
+                        rr_metrics = analysis_res
+                    else:
+                        st.error("❌ 신호 분석에 실패했습니다.")
+                        st.stop()
                     
                     # 4. 의학적 추론
                     thresholds = {"MI": 0.5, "AFIB": 0.3}
-                    structured_findings = get_clinical_reasoning(main_probs, spec_probs_np, rr_metrics, thresholds)
+                    # spec_probs는 하이브리드 세션에서 확장 가능하나 현재는 placeholder
+                    spec_probs_placeholder = np.zeros(6) 
+                    structured_findings = get_clinical_reasoning(main_probs, spec_probs_placeholder, rr_metrics, thresholds)
                     
                     # 5. Gemini 리포트 생성
                     llm_report = generate_llm_report(uploaded_file.name, structured_findings)
@@ -220,4 +222,6 @@ def main():
             st.rerun()
 
 if __name__ == "__main__":
+    main()
+
     main()
