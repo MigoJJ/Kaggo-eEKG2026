@@ -44,6 +44,10 @@ beat_arrhythmia:
   ventricular_burden_threshold: 0.05       # 비트 중 V(심실조기박동) 비율 임계
   supraventricular_burden_threshold: 0.05  # 비트 중 S(상심실조기박동) 비율 임계
 
+# 4단계 — ST-T 허혈 정밀 및 QT 분할 (LUDB+QTDB 학습, European ST-T 검증, Phase 4)
+st_ischemia:
+  model_path: ./models/stage4_delineator.onnx
+
 paths:
   datasets_root: /mnt/t7/datasets
   ptbxl: /mnt/t7/datasets/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3

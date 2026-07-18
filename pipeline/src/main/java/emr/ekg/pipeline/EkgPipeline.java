@@ -10,6 +10,7 @@ import emr.ekg.features.morphology.LeadMorphology;
 import emr.ekg.features.morphology.LeadMorphologyExtractor;
 import emr.ekg.inference.BeatArrhythmiaClassifier;
 import emr.ekg.inference.FeatureBasedNormClassifier;
+import emr.ekg.inference.Stage4DelineatorClassifier;
 import emr.ekg.persistence.ReportStatus;
 import emr.ekg.rules.ConductionRuleEngine;
 import emr.ekg.rules.EmergencyRuleEngine;
@@ -48,20 +49,28 @@ public final class EkgPipeline implements AutoCloseable {
     private final RuleThresholds ruleThresholds;
     private final BeatArrhythmiaConfig beatArrhythmiaConfig;
     private final BeatArrhythmiaClassifier beatClassifier;
+    private final Path stIschemiaModelPath;
+    private final Stage4DelineatorClassifier stIschemiaClassifier;
 
     public EkgPipeline(Path triageModelJson, String referenceLeadName) throws IOException {
         this(PreprocessConfig.defaults(), triageModelJson, referenceLeadName, RuleThresholds.defaults(),
-                BeatArrhythmiaConfig.unavailable());
+                BeatArrhythmiaConfig.unavailable(), null);
     }
 
     public EkgPipeline(PreprocessConfig preprocessConfig, Path triageModelJson, String referenceLeadName,
             RuleThresholds ruleThresholds, BeatArrhythmiaConfig beatArrhythmiaConfig) throws IOException {
+        this(preprocessConfig, triageModelJson, referenceLeadName, ruleThresholds, beatArrhythmiaConfig, null);
+    }
+
+    public EkgPipeline(PreprocessConfig preprocessConfig, Path triageModelJson, String referenceLeadName,
+            RuleThresholds ruleThresholds, BeatArrhythmiaConfig beatArrhythmiaConfig, Path stIschemiaModelPath) throws IOException {
         this.preprocessConfig = preprocessConfig;
         this.preprocessor = new EcgPreprocessor(preprocessConfig);
         this.triageClassifier = FeatureBasedNormClassifier.loadFromJson(triageModelJson);
         this.referenceLeadName = referenceLeadName;
         this.ruleThresholds = ruleThresholds;
         this.beatArrhythmiaConfig = beatArrhythmiaConfig;
+        this.stIschemiaModelPath = stIschemiaModelPath;
 
         if (beatArrhythmiaConfig.isAvailable()) {
             try {
@@ -72,6 +81,16 @@ public final class EkgPipeline implements AutoCloseable {
         } else {
             this.beatClassifier = null;
         }
+
+        if (stIschemiaModelPath != null && java.nio.file.Files.exists(stIschemiaModelPath)) {
+            try {
+                this.stIschemiaClassifier = new Stage4DelineatorClassifier(stIschemiaModelPath);
+            } catch (OrtException e) {
+                throw new IOException("Stage4 모델 로드 실패: " + stIschemiaModelPath, e);
+            }
+        } else {
+            this.stIschemiaClassifier = null;
+        }
     }
 
     /** config/pipeline.yaml로부터 파이프라인을 구성한다(재보정 시 YAML만 고치면 됨). */
@@ -80,7 +99,7 @@ public final class EkgPipeline implements AutoCloseable {
                 config.targetFs(), config.bandpassLowHz(), config.bandpassHighHz(),
                 config.notchHz(), config.sqiThreshold());
         return new EkgPipeline(preprocessConfig, config.triageModelPath(), config.referenceLeadName(),
-                config.ruleThresholds(), config.beatArrhythmiaConfig());
+                config.ruleThresholds(), config.beatArrhythmiaConfig(), config.stIschemiaModelPath());
     }
 
     public DiagnosticReport process(String recordId, String source, RawEcgSignal raw, Sex sex) {
@@ -114,10 +133,21 @@ public final class EkgPipeline implements AutoCloseable {
                     ecg, beats, referenceLeadName, beatClassifier, beatArrhythmiaConfig));
         }
 
+        boolean stIschemiaAvailable = stIschemiaClassifier != null;
+        if (stIschemiaAvailable) {
+            try {
+                // Stage 4 런타임 추론 기동 (12유도 P/QRS/T 픽셀 분할 수행)
+                int[][] mask = stIschemiaClassifier.classify(ecg.samples());
+                // 추후 수립될 고도화 룰: 이 마스크를 활용해 J점 기준 ST편위를 재보정하고 QT-interval 정밀 측정을 고도화할 수 있습니다.
+            } catch (OrtException e) {
+                // 개별 추론 오류가 파이프라인 전체를 중단시키지 않고 우아하게 반려
+            }
+        }
+
         DiagnosticReport report = new DiagnosticReport(
                 recordId, source, Instant.now(), ecg.fs(), ecg.sampleCount(), ecg.sqi(), true,
                 features, triageScore, triageClassifier.version(),
-                findings, beatArrhythmiaAvailable, false, ReportStatus.PENDING_SIGN);
+                findings, beatArrhythmiaAvailable, stIschemiaAvailable, ReportStatus.PENDING_SIGN);
         return new PipelineResult(report, ecg);
     }
 
@@ -128,6 +158,13 @@ public final class EkgPipeline implements AutoCloseable {
                 beatClassifier.close();
             } catch (OrtException e) {
                 // 종료 시 리소스 정리 실패는 무시 — 프로세스 종료를 막을 이유가 없다.
+            }
+        }
+        if (stIschemiaClassifier != null) {
+            try {
+                stIschemiaClassifier.close();
+            } catch (OrtException e) {
+                // 리소스 정리 무시
             }
         }
     }

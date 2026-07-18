@@ -22,6 +22,7 @@ public record PipelineConfig(
         Path triageModelPath,
         RuleThresholds ruleThresholds,
         BeatArrhythmiaConfig beatArrhythmiaConfig,
+        Path stIschemiaModelPath,
         String referenceLeadName) {
 
     private static final double UV_TO_MV = 1.0 / 1000.0;
@@ -38,6 +39,7 @@ public record PipelineConfig(
         Map<String, Object> emergency = (Map<String, Object>) root.get("emergency");
         Map<String, Object> conduction = (Map<String, Object>) root.get("conduction");
         Map<String, Object> beatArrhythmia = (Map<String, Object>) root.get("beat_arrhythmia");
+        Map<String, Object> stIschemia = (Map<String, Object>) root.get("st_ischemia");
 
         // config/pipeline.yaml은 <프로젝트루트>/config/에 위치하고, model_path 등 경로는
         // 프로젝트 루트 기준 상대경로다(paths: 섹션의 ./models, ./data 등과 동일 관례).
@@ -51,6 +53,10 @@ public record PipelineConfig(
                         projectRoot.resolve((String) beatArrhythmia.get("model_path")).normalize(),
                         asDouble(beatArrhythmia, "ventricular_burden_threshold", 0.05),
                         asDouble(beatArrhythmia, "supraventricular_burden_threshold", 0.05));
+
+        Path stIschemiaModelPath = stIschemia == null
+                ? null
+                : projectRoot.resolve((String) stIschemia.get("model_path")).normalize();
 
         RuleThresholds thresholds = new RuleThresholds(
                 asDouble(emergency, "stemi_st_elevation_uv", 100) * UV_TO_MV,
@@ -71,6 +77,7 @@ public record PipelineConfig(
                 modelPath,
                 thresholds,
                 beatConfig,
+                stIschemiaModelPath,
                 "II");
     }
 
