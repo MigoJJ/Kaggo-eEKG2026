@@ -42,6 +42,7 @@ class EkgPipelineTest {
         assertEquals(20, report.features().size());
         assertTrue(report.normTriageScore() >= 0.0 && report.normTriageScore() <= 1.0);
         assertEquals("stage1-logreg-v1", report.triageModelVersion());
+        assertTrue(report.triageModelHash().matches("[0-9a-f]{64}"));
         assertFalse(report.beatArrhythmiaAvailable(), "Stage3는 Phase 4 이전에는 미구현이어야 함");
         assertFalse(report.stIschemiaAvailable(), "Stage4는 Phase 4 이전에는 미구현이어야 함");
     }
@@ -80,7 +81,11 @@ class EkgPipelineTest {
             assertTrue(found.isPresent());
             assertEquals(ReportStatus.PENDING_SIGN, found.get().status());
             assertEquals(report.normTriageScore(), found.get().normTriageScore(), 1e-9);
+            assertEquals(report.triageModelVersion(), found.get().triageModelVersion());
+            assertEquals(report.triageModelHash(), found.get().triageModelHash());
             assertEquals(20, repository.findFeatures("test-2").size());
+            assertEquals(1, repository.findAuditLogs("test-2").size());
+            assertEquals(report.triageModelHash(), repository.findAuditLogs("test-2").get(0).modelHash());
         }
     }
 }

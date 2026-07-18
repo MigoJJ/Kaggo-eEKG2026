@@ -1,0 +1,155 @@
+# Kaggle copy-paste commands for EKGGDSEMR2026
+#
+# Assumption:
+# - Project source is available at /kaggle/working/EKGGDSEMR2026
+# - Run from a Kaggle Notebook with GPU enabled.
+
+cd /kaggle/working/EKGGDSEMR2026/ml
+
+pip install -q wfdb scipy onnx onnxruntime pandas numpy scikit-learn
+
+
+################################################################################
+# 0. Inspect Kaggle inputs
+################################################################################
+
+python kaggle_discover_inputs.py --input-root /kaggle/input
+
+
+################################################################################
+# 1. Stage4: LUDB + QTDB training, European ST-T sweep, ONNX + sidecar export
+################################################################################
+
+# Use explicit roots for the qtdb-ludb PhysioNet mirror path shown by the user.
+# If European ST-T is mounted separately, replace --edb-root with that path.
+
+python kaggle_run_stage4.py \
+  --input-root /kaggle/input \
+  --ludb-root /kaggle/input/datasets/abdessamiguebli/qtdb-ludb/physionet.org/files/ludb/1.0.1 \
+  --qtdb-root /kaggle/input/datasets/abdessamiguebli/qtdb-ludb/physionet.org/files/qtdb/1.0.0 \
+  --epochs 30 \
+  --batch-size 8 \
+  --lr 1e-3 \
+  --working-dir /kaggle/working
+
+# Expected outputs:
+# /kaggle/working/stage4_delineator.pt
+# /kaggle/working/stage4_delineator.onnx
+# /kaggle/working/stage4_delineator.json
+# /kaggle/working/european_stt_threshold_sweep.csv  (only if European ST-T root is found)
+
+
+################################################################################
+# 2. Stage4 with explicit European ST-T root
+################################################################################
+
+# Use this form if European ST-T is mounted and auto-discovery does not find it.
+# Replace the --edb-root path with the actual path printed by Kaggle.
+
+python kaggle_run_stage4.py \
+  --input-root /kaggle/input \
+  --ludb-root /kaggle/input/datasets/abdessamiguebli/qtdb-ludb/physionet.org/files/ludb/1.0.1 \
+  --qtdb-root /kaggle/input/datasets/abdessamiguebli/qtdb-ludb/physionet.org/files/qtdb/1.0.0 \
+  --edb-root /kaggle/input/european-st-t-database-100/european-st-t-database-1.0.0 \
+  --epochs 30 \
+  --batch-size 8 \
+  --lr 1e-3 \
+  --working-dir /kaggle/working
+
+
+################################################################################
+# 3. Stage1 waveform Transformer: PTB-XL preprocessed training
+################################################################################
+
+# Required input:
+# - A Kaggle dataset containing Java PtbxlPreprocessExporter outputs:
+#   manifest.csv + one <ecg_id>.f32 file per record.
+# - A Kaggle dataset containing ptbxl_database.csv.
+#
+# If auto-discovery finds both, this is enough:
+
+python kaggle_run_stage1_waveform.py \
+  --input-root /kaggle/input \
+  --model-type transformer \
+  --epochs 30 \
+  --batch-size 32 \
+  --lr 1e-4 \
+  --working-dir /kaggle/working
+
+# If auto-discovery fails, pass explicit paths:
+
+python kaggle_run_stage1_waveform.py \
+  --export-dir /kaggle/input/ptbxl-preprocessed \
+  --ptbxl-csv /kaggle/input/ptbxl/ptbxl_database.csv \
+  --model-type transformer \
+  --epochs 30 \
+  --batch-size 32 \
+  --lr 1e-4 \
+  --working-dir /kaggle/working
+
+# Expected outputs:
+# /kaggle/working/stage1_norm_transformer.pt
+# /kaggle/working/stage1_norm_transformer.onnx
+# /kaggle/working/stage1_norm_transformer.json
+
+
+################################################################################
+# 4. Stage1 waveform CNN baseline
+################################################################################
+
+python kaggle_run_stage1_waveform.py \
+  --input-root /kaggle/input \
+  --model-type cnn \
+  --epochs 30 \
+  --batch-size 64 \
+  --lr 1e-3 \
+  --working-dir /kaggle/working
+
+# Expected outputs:
+# /kaggle/working/stage1_norm_cnn.pt
+# /kaggle/working/stage1_norm_cnn.onnx
+# /kaggle/working/stage1_norm_cnn.json
+
+
+################################################################################
+# 5. Quick low-budget smoke runs
+################################################################################
+
+# Use these first to validate paths and code before spending a full Kaggle session.
+
+python kaggle_run_stage4.py \
+  --input-root /kaggle/input \
+  --ludb-root /kaggle/input/datasets/abdessamiguebli/qtdb-ludb/physionet.org/files/ludb/1.0.1 \
+  --qtdb-root /kaggle/input/datasets/abdessamiguebli/qtdb-ludb/physionet.org/files/qtdb/1.0.0 \
+  --epochs 1 \
+  --batch-size 4 \
+  --working-dir /kaggle/working
+
+python kaggle_run_stage1_waveform.py \
+  --input-root /kaggle/input \
+  --model-type cnn \
+  --epochs 1 \
+  --batch-size 16 \
+  --working-dir /kaggle/working
+
+
+################################################################################
+# 6. Files to download back to local project
+################################################################################
+
+# Stage4:
+# /kaggle/working/stage4_delineator.onnx  -> models/stage4_delineator.onnx
+# /kaggle/working/stage4_delineator.json  -> models/stage4_delineator.json
+# /kaggle/working/european_stt_threshold_sweep.csv -> reports/european_stt_threshold_sweep.csv
+
+# Stage1 waveform candidate:
+# /kaggle/working/stage1_norm_transformer.onnx -> models/stage1_norm_transformer.onnx
+# /kaggle/working/stage1_norm_transformer.json -> models/stage1_norm_transformer.json
+
+
+################################################################################
+# 7. Local verification after downloading artifacts
+################################################################################
+
+python -m unittest discover -s ml/tests
+./gradlew test

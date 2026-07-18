@@ -5,12 +5,14 @@ import emr.ekg.persistence.ReportStatus;
 import emr.ekg.signal.RawEcgSignal;
 import emr.ekg.signal.wfdb.WfdbRecordReader;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -21,9 +23,13 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PipelineConfigTest {
 
     private static final Path CONFIG_YAML = Path.of("/home/migowj/git/EKGGDSEMR2026/config/pipeline.yaml");
+    private static final Path MODEL_JSON = Path.of("/home/migowj/git/EKGGDSEMR2026/models/stage1_logreg.json");
     private static final Path PTBXL_HEADER = Path.of(
             "/mnt/t7/datasets/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3"
                     + "/records500/00000/00001_hr.hea");
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void loadsRealConfigYaml() throws IOException {
@@ -71,5 +77,56 @@ class PipelineConfigTest {
 
             assertTrue(report.beatArrhythmiaAvailable(), "Stage3 모델이 있으면 available=true여야 함");
         }
+    }
+
+    @Test
+    void optionalStageModelsCanBeAbsentWithoutBreakingPipelineConstruction() throws IOException {
+        assumeTrue(Files.exists(MODEL_JSON), "학습된 1단계 모델 미탑재 - 스킵");
+
+        Path configYaml = writeConfigWithMissingOptionalModels();
+        PipelineConfig config = PipelineConfig.loadFromYaml(configYaml);
+
+        assertTrue(Files.exists(config.triageModelPath()), "필수 Stage1 모델은 존재해야 함");
+        assertFalse(config.beatArrhythmiaConfig().isAvailable(),
+                "Stage3 model_path가 없으면 available=false여야 함");
+        assertFalse(Files.exists(config.stIschemiaModelPath()),
+                "Stage4 model_path가 없어도 fromConfig 생성은 실패하지 않아야 함");
+
+        try (EkgPipeline ignored = EkgPipeline.fromConfig(config)) {
+            // 생성 자체가 계약이다: Kaggle ONNX가 아직 없어도 로컬 배관은 살아 있어야 한다.
+        }
+    }
+
+    private Path writeConfigWithMissingOptionalModels() throws IOException {
+        Path configDir = tempDir.resolve("config");
+        Files.createDirectories(configDir);
+        Path configYaml = configDir.resolve("pipeline.yaml");
+        Files.writeString(configYaml, """
+                signal:
+                  target_fs: 500
+                  bandpass_low: 0.5
+                  bandpass_high: 40.0
+                  notch_hz: 60.0
+                  sqi_threshold: 0.6
+                normal_triage:
+                  model_path: %s
+                emergency:
+                  stemi_st_elevation_uv: 100
+                  stemi_st_elevation_v2v3_uv: 150
+                  stemi_contiguous_leads: 2
+                  ischemia_st_depression_uv: 50
+                  ischemia_contiguous_leads: 2
+                  longqt_qtc_ms: 500
+                conduction:
+                  bbb_qrs_ms: 120
+                  avb1_pr_ms: 200
+                beat_arrhythmia:
+                  model_path: ./models/missing_stage3_beat.onnx
+                  ventricular_burden_threshold: 0.05
+                  supraventricular_burden_threshold: 0.05
+                st_ischemia:
+                  model_path: ./models/missing_stage4_delineator.onnx
+                """.formatted(MODEL_JSON));
+        return configYaml;
     }
 }

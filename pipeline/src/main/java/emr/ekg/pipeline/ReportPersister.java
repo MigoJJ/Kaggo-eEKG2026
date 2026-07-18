@@ -37,6 +37,11 @@ public final class ReportPersister {
 
         ReportRow reportRow = new ReportRow(
                 report.recordId(), report.status(), report.normTriageScore(), report.triageModelVersion(),
+                report.triageModelHash(), report.triageModelMetadataHash(), report.triageModelMetadataJson(),
+                report.beatArrhythmiaModelVersion(), report.beatArrhythmiaModelHash(),
+                report.beatArrhythmiaModelMetadataHash(), report.beatArrhythmiaModelMetadataJson(),
+                report.stIschemiaModelVersion(), report.stIschemiaModelHash(),
+                report.stIschemiaModelMetadataHash(), report.stIschemiaModelMetadataJson(),
                 report.beatArrhythmiaAvailable(), report.stIschemiaAvailable(), null, null, report.createdAt());
 
         repository.save(record, features, findings, reportRow);

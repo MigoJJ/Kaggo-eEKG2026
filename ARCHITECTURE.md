@@ -109,7 +109,7 @@ codex resume 019f6d0a-788e-75f0-adbc-7b05d869ceab
 - 각 판정은 사용된 피처값·임계를 근거로 기록.
 
 ### 3단계 — Beat 부정맥 검증 (inference, Java + Python 학습)
-- **MIT-BIH 전이학습** CNN-Transformer 백본, R-peak 기준 비트 슬라이싱.
+- **MIT-BIH 전이학습** 1D-CNN/ResNet/Inception 백본, R-peak 기준 비트 슬라이싱.
 - 비트 분류 **N/S/V/F/Q** (AAMI) 통계 → PVC·PAC·이소성 부담 정량.
 - ❗ **전도장애 교차검증 아님**(P5). RBBB/LBBB 확정은 2단계 소관.
 - 리드 구성(2→12)·샘플레이트(360→500) 차이는 학습 시 어댑터로 흡수.
@@ -170,7 +170,12 @@ EKGGDSEMR2026/
 - `ecg_feature(record_id, feature_rank, name, value, unit, normal_low, normal_high, in_range)` — 20 피처 수치.
 - `diagnosis(id, record_id, stage, code, label, confidence, evidence_json, model_version, created_at)` — 단계별 소견.
 - `report(id, record_id, status[PENDING_SIGN|SIGNED], signed_by, signed_at, payload_json)`.
-- `audit_log(id, actor, action, target, model_hash, ts)` — 감사추적(dka-emr-audit.db 연계 가능).
+- `report(..., triage_model_hash, beat_arrhythmia_model_hash, st_ischemia_model_hash, *_metadata_hash)` —
+  판독 당시 사용한 모델 파일/sidecar 식별자.
+- `model_artifact(model_hash, stage, model_version, metadata_hash, metadata_json, registered_at)` —
+  ONNX 옆 sidecar JSON(데이터셋 버전·학습일·성능·환경·입출력 시그니처)을 모델 해시 기준으로 보관.
+- `audit_log(id, actor, action, target, model_version, model_hash, model_metadata_hash, ts)` —
+  감사추적(dka-emr-audit.db 연계 가능).
 
 ### /mnt/t7 (대용량 Raw & 학습)
 - `datasets/` PTB-XL(records500)·MIT-BIH·challenge_2021 원본 유지.
@@ -254,8 +259,10 @@ EKGGDSEMR2026/
 - **Phase 4 (Stage3 backbone 완료, Stage4는 데이터 대기)** — "backbone 우선, 정확도는 Kaggle P100
   학습 후 보정" 원칙으로 진행:
   - **Stage3(Beat 부정맥)**: MIT-BIH(DS1=train/DS2=test, de Chazal 표준 분할)로 AAMI 5-클래스
-    (N/S/V/F/Q) CNN(`ecgml/models/stage3_beat.py`)을 학습·ONNX export·Java `BeatArrhythmiaClassifier`
-    연동까지 **엔드투엔드로 실증 완료**. `Stage3ArrhythmiaAnalyzer`가 비트별 분류를 집계해 이소성
+    (N/S/V/F/Q) 백본(`ecgml/models/stage3_beat.py`)을 학습·ONNX export·Java
+    `BeatArrhythmiaClassifier` 연동까지 **엔드투엔드로 실증 완료**. 기본 `cnn`은 기존 체크포인트
+    호환용으로 유지하고, Kaggle P100 재학습 시 `--model-type resnet` 또는 `--model-type inception`으로
+    잔차/멀티스케일 시계열 특징 추출 백본을 선택할 수 있다. `Stage3ArrhythmiaAnalyzer`가 비트별 분류를 집계해 이소성
     부담(ectopy burden) 소견을 산출하고, `EkgPipeline`이 실제 PTB-XL 레코드에서
     `beatArrhythmiaAvailable=true`를 반환함을 UI 스크린샷으로 확인.
     ⚠️ 정확도 미검증(학습 시 혼동행렬 기준 N/F 혼동 다수, test acc ~50%대) — 배관 증명이 목적이며

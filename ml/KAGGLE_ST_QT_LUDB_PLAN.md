@@ -20,6 +20,15 @@ pip install -q wfdb scipy onnx onnxruntime
 cd /kaggle/working/EKGGDSEMR2026/ml
 ```
 
+먼저 Kaggle input 자동 탐색 결과를 확인한다.
+
+```bash
+python kaggle_discover_inputs.py --input-root /kaggle/input
+```
+
+`abdessamiguebli/qtdb-ludb`처럼 PhysioNet mirror 구조인 경우에도
+`physionet.org/files/ludb/1.0.1`, `physionet.org/files/qtdb/1.0.0` root를 자동 탐색한다.
+
 ## 1. 데이터셋 구조 확인
 
 Kaggle input 경로는 업로드 이름에 따라 달라진다. 먼저 실제 record 수, annotation 확장자, symbol을 확인한다.
@@ -47,6 +56,17 @@ python inspect_wfdb_dataset.py \
 ## 2. LUDB + QTDB delineator 학습
 
 QTDB는 2유도인 경우가 많아 12채널 zero-padding으로 학습에 포함된다. LUDB는 12유도 boundary 학습의 주 데이터로 둔다.
+
+```bash
+python kaggle_run_stage4.py \
+  --input-root /kaggle/input \
+  --epochs 30 \
+  --batch-size 8 \
+  --working-dir /kaggle/working
+```
+
+위 runner는 root 탐색 → LUDB/QTDB 학습 → European ST-T threshold sweep(탐색된 경우) →
+ONNX export + sidecar JSON 생성을 순서대로 실행한다. root를 직접 지정하려면 아래처럼 실행한다.
 
 ```bash
 python train_stage4_delineator.py \
@@ -99,8 +119,11 @@ python export_stage4_delineator_onnx.py \
 산출물:
 
 - `/kaggle/working/stage4_delineator.onnx`
+- `/kaggle/working/stage4_delineator.json`
 
-`max_abs_diff <= 1e-3`이면 PyTorch/ONNX Runtime 정합성은 통과다.
+`max_abs_diff <= 1e-3`이면 PyTorch/ONNX Runtime 정합성은 통과다. export 스크립트는 ONNX 옆
+sidecar JSON도 생성하며, 여기에는 artifact SHA-256, opset, 입출력 시그니처, Python/package
+환경 버전이 포함된다.
 
 ## 5. 로컬 프로젝트 반영
 
@@ -118,4 +141,4 @@ reports/european_stt_threshold_sweep.csv
 2. `pipeline`에 `stIschemiaAvailable=true` 연결.
 3. `config/pipeline.yaml`에 Stage4 모델 경로 추가.
 4. PTB-XL NORM false positive와 European ST-T sensitivity를 함께 보고 ST 임계값 재보정.
-
+5. sidecar JSON이 Java audit log와 `model_artifact` 테이블에 metadata hash/raw JSON으로 저장되는지 확인.

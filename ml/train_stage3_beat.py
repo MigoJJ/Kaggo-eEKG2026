@@ -6,7 +6,7 @@ Kaggle P100에서 재학습할 때 다루기로 한다.
 
 사용법:
   python train_stage3_beat.py --mitbih-root /mnt/t7/datasets/mit-bih-arrhythmia-database-1.0.0 \
-      --epochs 10 --out models/stage3_beat.pt
+      --model-type resnet --epochs 10 --out models/stage3_beat_resnet.pt
 """
 
 import argparse
@@ -16,7 +16,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from ecgml.data.mitbih_dataset import CLASS_NAMES, DS1_RECORDS, DS2_RECORDS, MitbihBeatDataset
-from ecgml.models.stage3_beat import BeatClassifier
+from ecgml.models.stage3_beat import build_beat_classifier
 
 
 def main() -> None:
@@ -26,6 +26,12 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-3, help="Weight decay for L2 regularization")
+    parser.add_argument(
+        "--model-type",
+        choices=["cnn", "resnet", "inception"],
+        default="cnn",
+        help="cnn: 기존 소형 CNN. resnet/inception: 시계열 형태학 추출 강화 백본.",
+    )
     parser.add_argument("--out", default="models/stage3_beat.pt")
     parser.add_argument("--balanced-sampler", action="store_true", help="Use WeightedRandomSampler for training batch balancing")
     args = parser.parse_args()
@@ -44,7 +50,7 @@ def main() -> None:
     class_weights = class_weights / class_weights.sum() * len(CLASS_NAMES)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"device={device}")
+    print(f"device={device}, model_type={args.model_type}")
 
     if args.balanced_sampler:
         print("WeightedRandomSampler 기반 균형 샘플러 활성화")
@@ -64,7 +70,7 @@ def main() -> None:
 
     test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
 
-    model = BeatClassifier(n_classes=len(CLASS_NAMES)).to(device)
+    model = build_beat_classifier(args.model_type, n_classes=len(CLASS_NAMES)).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     out_path = Path(args.out)

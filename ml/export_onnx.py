@@ -7,6 +7,7 @@ from pathlib import Path
 
 import torch
 
+from ecgml.artifacts import write_sidecar
 from ecgml.models.stage1_norm import Stage1NormClassifier
 from ecgml.models.stage1_norm_transformer import Stage1NormTransformer
 
@@ -24,6 +25,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--model-type", choices=["cnn", "transformer"], default="cnn")
     parser.add_argument("--out", default="models/stage1_norm.onnx")
+    parser.add_argument("--version", help="sidecar JSON에 기록할 모델 버전")
     args = parser.parse_args()
 
     model = build_model(args.model_type)
@@ -57,6 +59,35 @@ def main() -> None:
     print(f"torch/onnxruntime 정합성 검증: max_abs_diff={max_diff:.2e}")
     if max_diff > 1e-3:
         raise RuntimeError(f"ONNX export 정합성 실패 (diff={max_diff})")
+
+    sidecar = write_sidecar(out_path, {
+        "stage": "stage1_waveform",
+        "version": args.version or f"stage1-waveform-{args.model_type}-ptbxl",
+        "model_type": args.model_type,
+        "opset_version": 17,
+        "trained_on": {
+            "dataset": "PTB-XL",
+            "split": "strat_fold 1-8 train / 9 val / 10 test",
+            "target_fs": 500,
+            "window_samples": 5000,
+        },
+        "input_signature": {
+            "input_name": "ecg_input",
+            "shape": ["batch", 12, 5000],
+            "dtype": "float32",
+            "normalization": "per-lead z-normalization, std_floor=1e-9",
+        },
+        "output_signature": {
+            "output_name": "norm_logit",
+            "shape": ["batch"],
+            "activation": "sigmoid at inference/reporting",
+        },
+        "export_validation": {
+            "max_abs_diff": max_diff,
+            "threshold": 1e-3,
+        },
+    })
+    print(f"sidecar 저장: {sidecar}")
 
 
 if __name__ == "__main__":

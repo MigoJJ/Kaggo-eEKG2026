@@ -26,6 +26,17 @@ public record DiagnosticReport(
         List<ClinicalFeature> features,
         double normTriageScore,
         String triageModelVersion,
+        String triageModelHash,
+        String triageModelMetadataHash,
+        String triageModelMetadataJson,
+        String beatArrhythmiaModelVersion,
+        String beatArrhythmiaModelHash,
+        String beatArrhythmiaModelMetadataHash,
+        String beatArrhythmiaModelMetadataJson,
+        String stIschemiaModelVersion,
+        String stIschemiaModelHash,
+        String stIschemiaModelMetadataHash,
+        String stIschemiaModelMetadataJson,
         List<Finding> findings,
         boolean beatArrhythmiaAvailable,
         boolean stIschemiaAvailable,
@@ -37,6 +48,7 @@ public record DiagnosticReport(
 
     public static DiagnosticReport rejected(String recordId, String source, int fs, int sampleCount, double sqi) {
         return new DiagnosticReport(recordId, source, Instant.now(), fs, sampleCount, sqi, false,
-                List.of(), Double.NaN, null, List.of(), false, false, ReportStatus.REJECTED);
+                List.of(), Double.NaN, null, null, null, null, null, null, null, null, null, null, null, null,
+                List.of(), false, false, ReportStatus.REJECTED);
     }
 }

@@ -30,6 +30,7 @@ public final class ReportRepository {
             replaceFeatures(record.id(), features);
             replaceFindings(record.id(), findings);
             upsertReport(report);
+            insertModelAuditLogs(report);
             connection.commit();
         } catch (SQLException e) {
             connection.rollback();
@@ -90,6 +91,46 @@ public final class ReportRepository {
             }
         }
         return ids;
+    }
+
+    public List<AuditLogRow> findAuditLogs(String targetPrefix) throws SQLException {
+        List<AuditLogRow> out = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT * FROM audit_log WHERE target LIKE ? ORDER BY id")) {
+            ps.setString(1, targetPrefix + "%");
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new AuditLogRow(
+                            rs.getLong("id"),
+                            rs.getString("actor"),
+                            rs.getString("action"),
+                            rs.getString("target"),
+                            rs.getString("model_version"),
+                            rs.getString("model_hash"),
+                            rs.getString("model_metadata_hash"),
+                            Instant.parse(rs.getString("ts"))));
+                }
+            }
+        }
+        return out;
+    }
+
+    public Optional<ModelArtifactRow> findModelArtifact(String modelHash) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement("SELECT * FROM model_artifact WHERE model_hash=?")) {
+            ps.setString(1, modelHash);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+                return Optional.of(new ModelArtifactRow(
+                        rs.getString("model_hash"),
+                        rs.getString("stage"),
+                        rs.getString("model_version"),
+                        rs.getString("metadata_hash"),
+                        rs.getString("metadata_json"),
+                        Instant.parse(rs.getString("registered_at"))));
+            }
+        }
     }
 
     public void sign(String recordId, String signedBy) throws SQLException {
@@ -169,11 +210,22 @@ public final class ReportRepository {
     private void upsertReport(ReportRow r) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement("""
                 INSERT INTO report (record_id, status, norm_triage_score, triage_model_version,
+                    triage_model_hash, triage_model_metadata_hash,
+                    beat_arrhythmia_model_version, beat_arrhythmia_model_hash, beat_arrhythmia_model_metadata_hash,
+                    st_ischemia_model_version, st_ischemia_model_hash, st_ischemia_model_metadata_hash,
                     beat_arrhythmia_available, st_ischemia_available, signed_by, signed_at, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(record_id) DO UPDATE SET status=excluded.status,
                     norm_triage_score=excluded.norm_triage_score,
                     triage_model_version=excluded.triage_model_version,
+                    triage_model_hash=excluded.triage_model_hash,
+                    triage_model_metadata_hash=excluded.triage_model_metadata_hash,
+                    beat_arrhythmia_model_version=excluded.beat_arrhythmia_model_version,
+                    beat_arrhythmia_model_hash=excluded.beat_arrhythmia_model_hash,
+                    beat_arrhythmia_model_metadata_hash=excluded.beat_arrhythmia_model_metadata_hash,
+                    st_ischemia_model_version=excluded.st_ischemia_model_version,
+                    st_ischemia_model_hash=excluded.st_ischemia_model_hash,
+                    st_ischemia_model_metadata_hash=excluded.st_ischemia_model_metadata_hash,
                     beat_arrhythmia_available=excluded.beat_arrhythmia_available,
                     st_ischemia_available=excluded.st_ischemia_available,
                     signed_by=excluded.signed_by, signed_at=excluded.signed_at,
@@ -183,11 +235,78 @@ public final class ReportRepository {
             ps.setString(2, r.status().name());
             ps.setDouble(3, r.normTriageScore());
             ps.setString(4, r.triageModelVersion());
-            ps.setInt(5, r.beatArrhythmiaAvailable() ? 1 : 0);
-            ps.setInt(6, r.stIschemiaAvailable() ? 1 : 0);
-            ps.setString(7, r.signedBy());
-            ps.setString(8, r.signedAt() == null ? null : r.signedAt().toString());
-            ps.setString(9, r.createdAt().toString());
+            ps.setString(5, r.triageModelHash());
+            ps.setString(6, r.triageModelMetadataHash());
+            ps.setString(7, r.beatArrhythmiaModelVersion());
+            ps.setString(8, r.beatArrhythmiaModelHash());
+            ps.setString(9, r.beatArrhythmiaModelMetadataHash());
+            ps.setString(10, r.stIschemiaModelVersion());
+            ps.setString(11, r.stIschemiaModelHash());
+            ps.setString(12, r.stIschemiaModelMetadataHash());
+            ps.setInt(13, r.beatArrhythmiaAvailable() ? 1 : 0);
+            ps.setInt(14, r.stIschemiaAvailable() ? 1 : 0);
+            ps.setString(15, r.signedBy());
+            ps.setString(16, r.signedAt() == null ? null : r.signedAt().toString());
+            ps.setString(17, r.createdAt().toString());
+            ps.executeUpdate();
+        }
+    }
+
+    private void insertModelAuditLogs(ReportRow report) throws SQLException {
+        insertModelAuditLog(report.recordId(), "stage1", report.triageModelVersion(), report.triageModelHash(),
+                report.triageModelMetadataHash(), report.createdAt());
+        upsertModelArtifact("stage1", report.triageModelVersion(), report.triageModelHash(),
+                report.triageModelMetadataHash(), report.triageModelMetadataJson(), report.createdAt());
+        insertModelAuditLog(report.recordId(), "stage3", report.beatArrhythmiaModelVersion(),
+                report.beatArrhythmiaModelHash(), report.beatArrhythmiaModelMetadataHash(), report.createdAt());
+        upsertModelArtifact("stage3", report.beatArrhythmiaModelVersion(), report.beatArrhythmiaModelHash(),
+                report.beatArrhythmiaModelMetadataHash(), report.beatArrhythmiaModelMetadataJson(), report.createdAt());
+        insertModelAuditLog(report.recordId(), "stage4", report.stIschemiaModelVersion(),
+                report.stIschemiaModelHash(), report.stIschemiaModelMetadataHash(), report.createdAt());
+        upsertModelArtifact("stage4", report.stIschemiaModelVersion(), report.stIschemiaModelHash(),
+                report.stIschemiaModelMetadataHash(), report.stIschemiaModelMetadataJson(), report.createdAt());
+    }
+
+    private void insertModelAuditLog(String recordId, String stage, String modelVersion, String modelHash,
+            String metadataHash, Instant ts) throws SQLException {
+        if (modelHash == null || modelHash.isBlank()) {
+            return;
+        }
+        try (PreparedStatement ps = connection.prepareStatement("""
+                INSERT INTO audit_log (actor, action, target, model_version, model_hash, model_metadata_hash, ts)
+                VALUES (?,?,?,?,?,?,?)
+                """)) {
+            ps.setString(1, "pipeline");
+            ps.setString(2, "MODEL_USED");
+            ps.setString(3, recordId + ":" + stage);
+            ps.setString(4, modelVersion);
+            ps.setString(5, modelHash);
+            ps.setString(6, metadataHash);
+            ps.setString(7, ts.toString());
+            ps.executeUpdate();
+        }
+    }
+
+    private void upsertModelArtifact(String stage, String modelVersion, String modelHash, String metadataHash,
+            String metadataJson, Instant registeredAt) throws SQLException {
+        if (modelHash == null || modelHash.isBlank()) {
+            return;
+        }
+        try (PreparedStatement ps = connection.prepareStatement("""
+                INSERT INTO model_artifact (model_hash, stage, model_version, metadata_hash, metadata_json, registered_at)
+                VALUES (?,?,?,?,?,?)
+                ON CONFLICT(model_hash) DO UPDATE SET stage=excluded.stage,
+                    model_version=excluded.model_version,
+                    metadata_hash=excluded.metadata_hash,
+                    metadata_json=excluded.metadata_json,
+                    registered_at=excluded.registered_at
+                """)) {
+            ps.setString(1, modelHash);
+            ps.setString(2, stage);
+            ps.setString(3, modelVersion);
+            ps.setString(4, metadataHash);
+            ps.setString(5, metadataJson);
+            ps.setString(6, registeredAt.toString());
             ps.executeUpdate();
         }
     }
@@ -199,6 +318,17 @@ public final class ReportRepository {
                 ReportStatus.valueOf(rs.getString("status")),
                 rs.getDouble("norm_triage_score"),
                 rs.getString("triage_model_version"),
+                rs.getString("triage_model_hash"),
+                rs.getString("triage_model_metadata_hash"),
+                null,
+                rs.getString("beat_arrhythmia_model_version"),
+                rs.getString("beat_arrhythmia_model_hash"),
+                rs.getString("beat_arrhythmia_model_metadata_hash"),
+                null,
+                rs.getString("st_ischemia_model_version"),
+                rs.getString("st_ischemia_model_hash"),
+                rs.getString("st_ischemia_model_metadata_hash"),
+                null,
                 rs.getInt("beat_arrhythmia_available") != 0,
                 rs.getInt("st_ischemia_available") != 0,
                 rs.getString("signed_by"),

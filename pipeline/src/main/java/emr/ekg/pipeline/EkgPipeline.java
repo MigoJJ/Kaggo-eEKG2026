@@ -10,6 +10,7 @@ import emr.ekg.features.morphology.LeadMorphology;
 import emr.ekg.features.morphology.LeadMorphologyExtractor;
 import emr.ekg.inference.BeatArrhythmiaClassifier;
 import emr.ekg.inference.FeatureBasedNormClassifier;
+import emr.ekg.inference.ModelArtifactMetadata;
 import emr.ekg.inference.Stage4DelineatorClassifier;
 import emr.ekg.persistence.ReportStatus;
 import emr.ekg.rules.ConductionRuleEngine;
@@ -22,9 +23,15 @@ import emr.ekg.signal.preprocess.EcgPreprocessor;
 import emr.ekg.signal.preprocess.PreprocessConfig;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 
@@ -51,6 +58,15 @@ public final class EkgPipeline implements AutoCloseable {
     private final BeatArrhythmiaClassifier beatClassifier;
     private final Path stIschemiaModelPath;
     private final Stage4DelineatorClassifier stIschemiaClassifier;
+    private final String triageModelHash;
+    private final String beatArrhythmiaModelVersion;
+    private final String beatArrhythmiaModelHash;
+    private final String beatArrhythmiaModelMetadataHash;
+    private final String beatArrhythmiaModelMetadataJson;
+    private final String stIschemiaModelVersion;
+    private final String stIschemiaModelHash;
+    private final String stIschemiaModelMetadataHash;
+    private final String stIschemiaModelMetadataJson;
 
     public EkgPipeline(Path triageModelJson, String referenceLeadName) throws IOException {
         this(PreprocessConfig.defaults(), triageModelJson, referenceLeadName, RuleThresholds.defaults(),
@@ -71,6 +87,7 @@ public final class EkgPipeline implements AutoCloseable {
         this.ruleThresholds = ruleThresholds;
         this.beatArrhythmiaConfig = beatArrhythmiaConfig;
         this.stIschemiaModelPath = stIschemiaModelPath;
+        this.triageModelHash = sha256Hex(triageModelJson);
 
         if (beatArrhythmiaConfig.isAvailable()) {
             try {
@@ -78,18 +95,38 @@ public final class EkgPipeline implements AutoCloseable {
             } catch (OrtException e) {
                 throw new IOException("Stage3 모델 로드 실패: " + beatArrhythmiaConfig.modelPath(), e);
             }
+            this.beatArrhythmiaModelHash = sha256Hex(beatArrhythmiaConfig.modelPath());
+            ModelArtifactMetadata metadata =
+                    ModelArtifactMetadata.loadForModel(beatArrhythmiaConfig.modelPath(), "stage3", beatArrhythmiaModelHash);
+            this.beatArrhythmiaModelVersion = metadata.version();
+            this.beatArrhythmiaModelMetadataHash = metadata.metadataSha256();
+            this.beatArrhythmiaModelMetadataJson = metadata.rawJson();
         } else {
             this.beatClassifier = null;
+            this.beatArrhythmiaModelVersion = null;
+            this.beatArrhythmiaModelHash = null;
+            this.beatArrhythmiaModelMetadataHash = null;
+            this.beatArrhythmiaModelMetadataJson = null;
         }
 
-        if (stIschemiaModelPath != null && java.nio.file.Files.exists(stIschemiaModelPath)) {
+        if (stIschemiaModelPath != null && Files.exists(stIschemiaModelPath)) {
             try {
                 this.stIschemiaClassifier = new Stage4DelineatorClassifier(stIschemiaModelPath);
             } catch (OrtException e) {
                 throw new IOException("Stage4 모델 로드 실패: " + stIschemiaModelPath, e);
             }
+            this.stIschemiaModelHash = sha256Hex(stIschemiaModelPath);
+            ModelArtifactMetadata metadata =
+                    ModelArtifactMetadata.loadForModel(stIschemiaModelPath, "stage4", stIschemiaModelHash);
+            this.stIschemiaModelVersion = metadata.version();
+            this.stIschemiaModelMetadataHash = metadata.metadataSha256();
+            this.stIschemiaModelMetadataJson = metadata.rawJson();
         } else {
             this.stIschemiaClassifier = null;
+            this.stIschemiaModelVersion = null;
+            this.stIschemiaModelHash = null;
+            this.stIschemiaModelMetadataHash = null;
+            this.stIschemiaModelMetadataJson = null;
         }
     }
 
@@ -146,9 +183,29 @@ public final class EkgPipeline implements AutoCloseable {
 
         DiagnosticReport report = new DiagnosticReport(
                 recordId, source, Instant.now(), ecg.fs(), ecg.sampleCount(), ecg.sqi(), true,
-                features, triageScore, triageClassifier.version(),
+                features, triageScore, triageClassifier.version(), triageModelHash, null, null,
+                beatArrhythmiaModelVersion, beatArrhythmiaModelHash,
+                beatArrhythmiaModelMetadataHash, beatArrhythmiaModelMetadataJson,
+                stIschemiaModelVersion, stIschemiaModelHash,
+                stIschemiaModelMetadataHash, stIschemiaModelMetadataJson,
                 findings, beatArrhythmiaAvailable, stIschemiaAvailable, ReportStatus.PENDING_SIGN);
         return new PipelineResult(report, ecg);
+    }
+
+    private static String sha256Hex(Path path) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream in = Files.newInputStream(path);
+                    DigestInputStream digestIn = new DigestInputStream(in, digest)) {
+                byte[] buffer = new byte[8192];
+                while (digestIn.read(buffer) != -1) {
+                    // DigestInputStream updates the digest as bytes are read.
+                }
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 digest algorithm unavailable", e);
+        }
     }
 
     @Override
