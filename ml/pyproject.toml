@@ -1,0 +1,17 @@
+[project]
+name = "ecgml"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "torch",
+    "numpy",
+    "pandas",
+    "scipy",
+    "wfdb",
+    "onnx",
+    "onnxruntime",
+    "scikit-learn",
+]
+
+[tool.setuptools.packages.find]
+include = ["ecgml*"]

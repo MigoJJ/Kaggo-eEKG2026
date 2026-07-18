@@ -1,0 +1,25 @@
+# Gradle
+.gradle/
+.gradle-home/
+build/
+
+# 대용량 산출물 (모델·데이터는 /mnt/t7 또는 LFS)
+models/*.onnx
+models/*.pt
+data/*.db
+*.npz
+*.h5
+
+# Python
+ml/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store

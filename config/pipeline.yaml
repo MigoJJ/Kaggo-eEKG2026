@@ -1,0 +1,55 @@
+# EKG-GDS EMR 2026 — 파이프라인 설정 (임계값·경로·룰 파라미터)
+
+signal:
+  target_fs: 500            # 표준 샘플링레이트(Hz)
+  bandpass_low: 0.5         # 진단 대역 하한(Hz)
+  bandpass_high: 40.0       # 진단 대역 상한(Hz)
+  notch_hz: 60.0            # 전원 노이즈(국내 60Hz)
+  sqi_threshold: 0.6        # 이 미만이면 판독불가 반려
+
+# 1단계 — 정상 우선순위 분류 (게이팅 없음, P(NORM)은 검토 큐 정렬용 메타데이터일 뿐)
+# 모델: models/stage1_logreg.json (20피처 로지스틱회귀). 20개 요약 피처 기반 AND게이트로
+# 자동확정을 시도했을 때 실측 79% 오탐률이 나와 게이팅을 포기했다(ARCHITECTURE.md P2).
+normal_triage:
+  model_path: ./models/stage1_logreg.json
+
+# E단계 — 응급 fast-path (모든 ECG 대상, 1단계는 더 이상 게이팅하지 않음)
+# ⚠️ ischemia_st_depression_uv/ischemia_contiguous_leads는 Phase 6 실측에서 검증된 NORM
+# 레코드 다수에서 과발화가 확인된 미보정 값이다. Kaggle 학습·대규모 검증 후 데이터 기반으로
+# 재조정 예정 — 그 전까지는 이 파일만 고치면 되고 Java 코드 변경은 필요 없다(backbone 목표).
+emergency:
+  stemi_st_elevation_uv: 100     # 연속 리드 기준 (V2/V3 제외)
+  stemi_st_elevation_v2v3_uv: 150
+  stemi_contiguous_leads: 2
+  ischemia_st_depression_uv: 50
+  ischemia_contiguous_leads: 2
+  vt_rate_bpm: 120
+  vt_qrs_ms: 120
+  longqt_qtc_ms: 500
+  complete_avb: true
+
+# 2단계 — 룰 기반 전도장애/축
+conduction:
+  bbb_qrs_ms: 120
+  avb1_pr_ms: 200
+  lad_axis_deg: -30
+  rad_axis_deg: 100
+
+# 3단계 — Beat 부정맥 검증 (MIT-BIH 학습, Phase 4 backbone)
+# ⚠️ 정확도 미검증 모델이다(학습 시 N/F 혼동 다수 확인). 파이프라인 연동 자체가 목적이며,
+# Kaggle P100 재학습 후 정확도 보정 예정. model_path가 없거나 파일이 없으면
+# beatArrhythmiaAvailable=false로 우아하게 넘어간다(조용히 실패하지 않고 명시적으로 표시).
+beat_arrhythmia:
+  model_path: ./models/stage3_beat.onnx
+  ventricular_burden_threshold: 0.05       # 비트 중 V(심실조기박동) 비율 임계
+  supraventricular_burden_threshold: 0.05  # 비트 중 S(상심실조기박동) 비율 임계
+
+paths:
+  datasets_root: /mnt/t7/datasets
+  ptbxl: /mnt/t7/datasets/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3
+  mitbih: /mnt/t7/datasets/mit-bih-arrhythmia-database-1.0.0
+  # Phase 7 외부기관 교차검증용(CinC2020 재배포, WFDB format "16+24" .mat 컨테이너)
+  cpsc2018: "/mnt/t7/datasets/ecg_data/archive (1)/Training_WFDB"
+  chapman_shaoxing_ningbo: "/mnt/t7/datasets/ecg_data/archive (2)/WFDB_ShaoxingUniv"
+  models: ./models
+  sqlite_db: ./data/emr.db
