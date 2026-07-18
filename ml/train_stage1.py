@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader
 from ecgml.data.ptbxl_dataset import PtbxlNormDataset, load_labels
 from ecgml.models.stage1_norm import Stage1NormClassifier
 from ecgml.models.stage1_norm_transformer import Stage1NormTransformer
+from ecgml.torch_device import resolve_device
 
 
 def build_model(model_type: str) -> torch.nn.Module:
@@ -36,6 +37,7 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--out", default="models/stage1_norm.pt")
     args = parser.parse_args()
 
@@ -61,7 +63,7 @@ def main() -> None:
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
     print(f"device={device}, model_type={args.model_type}")
     model = build_model(args.model_type).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)

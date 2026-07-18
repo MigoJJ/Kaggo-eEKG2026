@@ -116,6 +116,8 @@ python kaggle_run_stage1_waveform.py \
 ################################################################################
 
 # Use these first to validate paths and code before spending a full Kaggle session.
+# If Kaggle's PyTorch build reports P100/sm_60 incompatibility, keep --device cpu
+# for smoke validation. Full training then needs a Kaggle image/PyTorch build that supports P100.
 
 python kaggle_run_stage4.py \
   --input-root /kaggle/input \
@@ -123,6 +125,7 @@ python kaggle_run_stage4.py \
   --qtdb-root /kaggle/input/datasets/abdessamiguebli/qtdb-ludb/physionet.org/files/qtdb/1.0.0 \
   --epochs 1 \
   --batch-size 4 \
+  --device cpu \
   --working-dir /kaggle/working
 
 python kaggle_run_stage1_waveform.py \
@@ -130,6 +133,7 @@ python kaggle_run_stage1_waveform.py \
   --model-type cnn \
   --epochs 1 \
   --batch-size 16 \
+  --device cpu \
   --working-dir /kaggle/working
 
 

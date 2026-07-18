@@ -32,6 +32,7 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--version")
     args = parser.parse_args()
@@ -54,6 +55,7 @@ def main() -> None:
         "epochs": args.epochs,
         "batch_size": args.batch_size,
         "lr": args.lr,
+        "device": args.device,
     }
     (working_dir / "stage1_waveform_resolved_paths.json").write_text(json.dumps(resolved, indent=2) + "\n")
     print(json.dumps(resolved, indent=2), flush=True)
@@ -78,6 +80,8 @@ def main() -> None:
             str(args.batch_size),
             "--lr",
             str(args.lr),
+            "--device",
+            args.device,
             "--out",
             str(checkpoint),
         ], cwd=ml_dir)

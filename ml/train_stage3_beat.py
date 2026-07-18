@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader
 
 from ecgml.data.mitbih_dataset import CLASS_NAMES, DS1_RECORDS, DS2_RECORDS, MitbihBeatDataset
 from ecgml.models.stage3_beat import build_beat_classifier
+from ecgml.torch_device import resolve_device
 
 
 def main() -> None:
@@ -26,6 +27,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-3, help="Weight decay for L2 regularization")
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument(
         "--model-type",
         choices=["cnn", "resnet", "inception"],
@@ -49,7 +51,7 @@ def main() -> None:
     class_weights = 1.0 / torch.sqrt(class_counts.clamp(min=1))
     class_weights = class_weights / class_weights.sum() * len(CLASS_NAMES)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
     print(f"device={device}, model_type={args.model_type}")
 
     if args.balanced_sampler:

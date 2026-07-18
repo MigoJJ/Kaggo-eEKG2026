@@ -16,6 +16,7 @@ from torch.utils.data import ConcatDataset, DataLoader, random_split
 
 from ecgml.data.wfdb_delineation_dataset import CLASS_NAMES, WfdbDelineationDataset
 from ecgml.models.stage4_delineator import Stage4Delineator
+from ecgml.torch_device import resolve_device
 
 
 def pixel_f1(confusion: torch.Tensor, cls: int) -> float:
@@ -47,6 +48,7 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--out", default="models/stage4_delineator.pt")
     args = parser.parse_args()
 
@@ -73,7 +75,7 @@ def main() -> None:
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
     print(f"device={device}")
     model = Stage4Delineator(n_classes=len(CLASS_NAMES)).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
