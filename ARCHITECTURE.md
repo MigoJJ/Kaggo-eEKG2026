@@ -269,10 +269,28 @@ EKGGDSEMR2026/
     재학습은 Kaggle P100에서 진행 예정. `BeatArrhythmiaConfig`가 모델 부재 시 조용히
     `beatArrhythmiaAvailable=false`로 넘어가도록 설계되어 있어(Phase 7과 동일 backbone 패턴),
     재학습된 모델을 `models/stage3_beat.onnx`에 덮어쓰기만 하면 코드 변경 없이 반영된다.
-  - **Stage4(ST-T 허혈 정밀)**: European ST-T 데이터셋이 로컬에 없어(다운로드 필요) 학습 보류.
-    모델 배치 시 Stage3와 동일한 backbone 패턴(config 경로 존재 확인 → available 플래그)을
-    재사용할 수 있도록 구조만 설계해둠.
+  - **Stage4(ST-T 허혈 정밀)**: (아래 Phase 8에서 backbone·Java 연동 완료. 이 항목은 당시 기준
+    기록으로 보존)European ST-T 데이터셋이 로컬에 없어(다운로드 필요) 학습 보류.
   - Python 환경에서 `onnx` 설치 시 numpy가 2.x로 업그레이드되며 `wfdb` 어노테이션 파서가
     깨지는 회귀를 발견·수정(`numpy<2`로 고정). 향후 이 환경에 패키지 추가 시 유의.
+- **Phase 8 (Stage4 U-Net backbone + Java 연동 완료, 학습 데이터 대기)**:
+  - Stage4를 멀티리드 1D U-Net(`ecgml/models/stage4_delineator.py`)으로 구현하고
+    `Stage4DelineatorClassifier.java` + `EkgPipeline`/`PipelineConfig` 연동까지 완료
+    (`config/pipeline.yaml`의 `st_ischemia.model_path: ./models/stage4_delineator.onnx`).
+    Stage3와 동일하게 모델 파일 부재 시 `stIschemiaAvailable=false`로 우아하게 넘어가는
+    패턴을 그대로 재사용.
+  - Kaggle 학습 실행기(`kaggle_run_stage4.py`, `kaggle_run_stage1_waveform.py`)와
+    GPU/CPU 자동 디바이스 선택(`ecgml/torch_device.py`)을 추가해 Kaggle 노트북에서
+    바로 학습을 돌릴 수 있는 상태. European ST-T threshold 평가 스크립트
+    (`evaluate_european_stt_thresholds.py`)도 준비됨.
+  - ⚠️ **아직 학습된 가중치 없음**: LUDB/QTDB/European ST-T 데이터셋을 Kaggle에 올려
+    실제로 학습을 돌리는 실행 단계만 남음(`ml/KAGGLE_ST_QT_LUDB_PLAN.md` 절차 참고).
+    Stage3도 `test acc ~50%대`로 Kaggle P100 재학습이 필요해 Phase 4의 한계가 그대로 유지됨.
+  - **모델 아티팩트 배포 규칙**: `ml/models/`는 git 추적 대상(작고 검증된 체크포인트의
+    출처)이고, 리포지토리 루트 `models/`는 `.gitignore`로 제외된 로컬 런타임 작업 디렉터리다
+    (Java 파이프라인이 실제로 읽는 경로). 학습/export 스크립트는 `ml/` 안에서 실행되어
+    기본적으로 `ml/models/`에 산출물을 쓰므로, **Java로 실행하기 전 `ml/models/*.onnx`를
+    루트 `models/`로 복사(동기화)하는 수동 단계가 필요하다.** 자동화된 배포 스크립트는 아직 없음
+    (2026-07-23 기준: `stage3_beat.onnx`/`.pt`가 동기화 누락되어 있던 것을 확인·복사함).
 
 각 Phase는 빌드·테스트 통과를 게이트로 다음으로 진행.
