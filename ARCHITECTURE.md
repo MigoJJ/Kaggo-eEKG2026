@@ -293,4 +293,62 @@ EKGGDSEMR2026/
     루트 `models/`로 복사(동기화)하는 수동 단계가 필요하다.** 자동화된 배포 스크립트는 아직 없음
     (2026-07-23 기준: `stage3_beat.onnx`/`.pt`가 동기화 누락되어 있던 것을 확인·복사함).
 
+- **Phase 9 (계획, 개인 전용 보조도구 스코프)** 📋 — **빠른 안전판** (새 데이터/학습 불필요):
+  - 모델 배포 동기화 자동화: `ml/models/*.{onnx,json,pt}` → 루트 `models/` 자동 복사 스크립트(`ml/sync_models.sh` 등)
+    작성. mtime/SHA-256 불일치 시 경고. 각 Kaggle plan 문서(`KAGGLE_STAGE3_PLAN.md`,
+    `KAGGLE_ST_QT_LUDB_PLAN.md`)의 "로컬 프로젝트 반영" 절차에 이 스크립트 실행을 명시 스텝으로 추가.
+    (2026-07-23 `stage3_beat.onnx` 동기화 누락 발견 사례 재발 방지.)
+  - app-fx 리포트 화면에 "알려진 한계" 캐비어트 노출: ischemia 룰 과발화(threshold 50µV 미보정),
+    RBBB/LBBB F1 근접 0. `report.payload_json`에도 감사기록으로 같이 저장.
+
+- **Phase 10 (계획)** 📋 — **Stage3 Kaggle 재학습(Beat 부정맥) + VT 룰**:
+  - `KAGGLE_STAGE3_PLAN.md` 절차대로 Kaggle P100에서 `cnn`/`resnet`/`inception` 3종 30 epoch 학습,
+    accuracy가 아닌 **S/V/F sensitivity** 우선으로 백본 선택, N/F·S/N 혼동 기록.
+  - `export_stage3_onnx.py`(opset17, `max_abs_diff ≤ 1e-3`) → `models/stage3_beat.onnx/.json` 교체 →
+    Phase9 동기화 스크립트 → `python -m unittest discover -s ml/tests`, `./gradlew :pipeline:test` 통과.
+  - **VT 룰 추가**(Stage3 정확도 확보 후): `RuleThresholds.java`의 기존 예약 필드 `vt_rate_bpm`/`vt_qrs_ms`
+    (`config/pipeline.yaml`에 이미 존재하나 `EmergencyRuleEngine.java`에는 아직 미연결 확인됨)를 실제 로직에
+    연결 — Stage3 beat 시퀀스 연속 V-beat ≥3 + rate>120bpm → VT 알람. `EmergencyRuleEngineTest.java`에
+    합성 V-run 회귀 테스트 추가. VF는 형태학적으로 난이도가 높아 1차는 SQI+파형 무질서도 기반의
+    저신뢰도 "coarse 후보" 플래그 수준으로만(의사 확인 전제).
+
+- **Phase 11 (계획)** 📋 — **Stage4 학습 데이터 확보 + 학습(ST-T 허혈, 현재 가중치 0)**:
+  - Kaggle에 LUDB/QTDB(`abdessamiguebli/qtdb-ludb` 등)·European ST-T attach →
+    `kaggle_discover_inputs.py`로 경로 자동탐색 → `inspect_wfdb_dataset.py`로 annotation 포맷 확인
+    (`q1c`, `pu`, `atr`/`st` 등).
+  - 저예산 smoke run(`kaggle_run_stage4.py --epochs 1 --batch-size 4 --device cpu`)으로 경로/코드 검증 후
+    본학습(`--epochs 30 --batch-size 8`, LUDB/QTDB 학습 → European ST-T sweep → export 자동 순서).
+  - `val_macro_wave_f1` 및 p/qrs/t 개별 F1 확인(`background` F1은 무시), `evaluate_european_stt_thresholds.py
+    --thresholds-uv 50,75,100,150,200`로 sweep CSV 생성.
+  - `models/stage4_delineator.onnx/.json` 배치 + 동기화 → `config/pipeline.yaml`의
+    `st_ischemia.model_path`는 이미 지정돼 있으므로 `stIschemiaAvailable=true` 전환만 확인
+    (Java wrapper는 Phase8에서 이미 연동 완료, 추가 코드 불필요).
+
+- **Phase 12 (계획, 로컬만으로 가능·Kaggle 불필요)** 📋 — **룰 임계값 데이터 기반 재보정**:
+  - `ml/evaluate_external_validation.py` 패턴 재사용해 로컬 PTB-XL 라벨 서브셋(21,799개)으로
+    RBBB/LBBB/AVB1/축편위 threshold sweep 스크립트 작성, 후보별 F1/precision/recall 표 생성.
+  - `ischemia_st_depression_uv`는 Phase11의 European ST-T sweep 결과 + PTB-XL NORM false-positive
+    결과를 함께 보고 결정(하나만 보고 바꾸지 않는다는 기존 원칙 유지). 채택 값은
+    `config/pipeline.yaml`만 수정(재컴파일·Java 코드 변경 불필요). 회귀 테스트
+    (`ConductionRuleEngineTest`, `EmergencyRuleEngineTest`) 통과 확인.
+
+- **Phase 13 (계획, 상시 반복)** 📋 — **회귀 게이트 + 개인 검증 루프**:
+  - Stage3/4 재학습마다 `ExternalValidationExporter` 재실행 → CPSC2018/Chapman-Shaoxing/Ningbo
+    AUROC/F1 추적, `ml/results/external_validation_report.md` 갱신.
+  - 개인 shadow-validation: 본인이 이미 서명 완료한 실제 판독 200~300건을 파이프라인으로 재실행해
+    본인 원래 판독과 diff 표 작성 — 규제기관 승인 대신 개인 전용 도구로서 실사용 신뢰도를
+    스스로 검증하는 절차. 불일치 케이스는 원인별(룰 임계값/모델 오류/전처리)로 분류해
+    Phase10/12 재보정에 피드백.
+
+- **Phase 14 (선택, 계획)** 📋 — **완전방실차단(AVB3) 룰**:
+  - `core-features`의 기존 P파/QRS 피델셜 타이밍만으로 P-QRS 해리 검출 규칙 설계(새 모델 불필요).
+  - `config/pipeline.yaml`의 `complete_avb: true` 플래그(현재 `EmergencyRuleEngine.java`에 미연결
+    확인됨)를 실제 로직에 연결. MIT-BIH/PTB-XL 내 AVB3 라벨 케이스로 검증(희귀 케이스라 소규모
+    수작업 검증 필요할 수 있음).
+
+**의존순서**: 9 → 10 → 11 고정(순차 진행 필요), 12는 아무 때나 병행 가능, 13은 매 변경마다 반복,
+14는 여유 있을 때. **스코프 결정(2026-07-23)**: 이 로드맵은 개인 전용 판독 보조도구를 목표로 하며
+(타 기관·타 의료진 배포 없음), 따라서 MFDS/FDA SaMD 인허가 트랙은 현재 범위 밖이다 — 배포 범위가
+바뀌면 이 결정을 재검토해야 한다.
+
 각 Phase는 빌드·테스트 통과를 게이트로 다음으로 진행.
