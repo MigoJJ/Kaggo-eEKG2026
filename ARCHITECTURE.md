@@ -293,13 +293,14 @@ EKGGDSEMR2026/
     루트 `models/`로 복사(동기화)하는 수동 단계가 필요하다.** 자동화된 배포 스크립트는 아직 없음
     (2026-07-23 기준: `stage3_beat.onnx`/`.pt`가 동기화 누락되어 있던 것을 확인·복사함).
 
-- **Phase 9 (계획, 개인 전용 보조도구 스코프)** 📋 — **빠른 안전판** (새 데이터/학습 불필요):
-  - 모델 배포 동기화 자동화: `ml/models/*.{onnx,json,pt}` → 루트 `models/` 자동 복사 스크립트(`ml/sync_models.sh` 등)
-    작성. mtime/SHA-256 불일치 시 경고. 각 Kaggle plan 문서(`KAGGLE_STAGE3_PLAN.md`,
-    `KAGGLE_ST_QT_LUDB_PLAN.md`)의 "로컬 프로젝트 반영" 절차에 이 스크립트 실행을 명시 스텝으로 추가.
-    (2026-07-23 `stage3_beat.onnx` 동기화 누락 발견 사례 재발 방지.)
-  - app-fx 리포트 화면에 "알려진 한계" 캐비어트 노출: ischemia 룰 과발화(threshold 50µV 미보정),
-    RBBB/LBBB F1 근접 0. `report.payload_json`에도 감사기록으로 같이 저장.
+- **Phase 9 (개인 전용 보조도구 스코프)** — **빠른 안전판** (새 데이터/학습 불필요):
+  - ✅ **모델 배포 동기화 자동화**(2026-08-23): `ml/sync_models.sh` 추가 — `ml/models/*.{onnx,json,pt}`
+    → 루트 `models/`로 복사(`cp -p`), 내용이 이미 동일하면 skip, 다르면 경고 후 덮어쓰기(`ml/models/`가
+    source of truth). `KAGGLE_STAGE3_PLAN.md`/`KAGGLE_ST_QT_LUDB_PLAN.md`의 "로컬 프로젝트 반영"
+    절차에 이 스크립트 실행을 명시 스텝으로 추가함. (2026-07-23 `stage3_beat.onnx` 동기화 누락
+    발견 사례 재발 방지.)
+  - 📋 app-fx 리포트 화면에 "알려진 한계" 캐비어트 노출: ischemia 룰 과발화(threshold 50µV 미보정),
+    RBBB/LBBB F1 근접 0. `report.payload_json`에도 감사기록으로 같이 저장. (미착수)
 
 - **Phase 10 (계획)** 📋 — **Stage3 Kaggle 재학습(Beat 부정맥) + VT 룰**:
   - `KAGGLE_STAGE3_PLAN.md` 절차대로 Kaggle P100에서 `cnn`/`resnet`/`inception` 3종 30 epoch 학습,

@@ -131,17 +131,18 @@ inception,,,,,,,false,
 
 ## 5. 로컬 프로젝트 반영
 
-선택된 ONNX를 내려받아 표준 계약 경로에 배치한다.
+선택된 ONNX를 내려받아 git 추적 대상인 `ml/models/`(source of truth)에 배치한다.
 
 ```text
-models/stage3_beat.onnx
-models/stage3_beat.json
+ml/models/stage3_beat.onnx
+ml/models/stage3_beat.json
 reports/stage3_model_comparison.csv
 ```
 
-그 다음 로컬에서 실행한다.
+`ml/sync_models.sh`로 Java가 실제로 읽는 루트 `models/`에 동기화한 뒤 로컬에서 실행한다.
 
 ```bash
+./ml/sync_models.sh
 python -m unittest discover -s ml/tests
 ./gradlew :pipeline:test --tests emr.ekg.pipeline.PipelineConfigTest
 ```

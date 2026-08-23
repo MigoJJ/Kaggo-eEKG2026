@@ -127,18 +127,24 @@ sidecar JSON도 생성하며, 여기에는 artifact SHA-256, opset, 입출력 �
 
 ## 5. 로컬 프로젝트 반영
 
-Kaggle output에서 아래 파일을 내려받아 프로젝트에 배치한다.
+Kaggle output에서 아래 파일을 내려받아 git 추적 대상인 `ml/models/`(source of truth)에 배치한다.
 
 ```text
-models/stage4_delineator.onnx
-models/stage4_delineator.json
+ml/models/stage4_delineator.onnx
+ml/models/stage4_delineator.json
 reports/european_stt_threshold_sweep.csv
 ```
 
-그 다음 Java 쪽에서 할 일:
+`ml/sync_models.sh`로 Java가 실제로 읽는 루트 `models/`에 동기화한다.
 
-1. `inference`에 Stage4 ONNX wrapper 추가.
-2. `pipeline`에 `stIschemiaAvailable=true` 연결.
-3. `config/pipeline.yaml`에 Stage4 모델 경로 추가.
-4. PTB-XL NORM false positive와 European ST-T sensitivity를 함께 보고 ST 임계값 재보정.
-5. sidecar JSON이 Java audit log와 `model_artifact` 테이블에 metadata hash/raw JSON으로 저장되는지 확인.
+```bash
+./ml/sync_models.sh
+```
+
+`inference` wrapper(`Stage4DelineatorClassifier.java`)·`pipeline`의 `stIschemiaAvailable` 연결·
+`config/pipeline.yaml`의 `st_ischemia.model_path`는 Phase 8에서 이미 완료되어 있으므로,
+가중치 배치 시 코드 변경 없이 `stIschemiaAvailable=true`로 자동 전환된다. 남은 Java 쪽 할 일:
+
+1. PTB-XL NORM false positive와 European ST-T sensitivity를 함께 보고 ST 임계값 재보정
+   (`config/pipeline.yaml`의 `ischemia_st_depression_uv`만 수정, 재컴파일 불요).
+2. sidecar JSON이 Java audit log와 `model_artifact` 테이블에 metadata hash/raw JSON으로 저장되는지 확인.
