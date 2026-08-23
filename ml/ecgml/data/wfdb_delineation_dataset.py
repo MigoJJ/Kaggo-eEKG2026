@@ -111,6 +111,7 @@ def extract_wave_spans(record_base: Path, fs: int, lead_names: list[str]) -> lis
             continue
 
         active: tuple[str, int] | None = None
+        annotator_spans: list[WaveSpan] = []
         for sample, symbol, note in zip(ann.sample, ann.symbol, ann.aux_note):
             label = _label_from_note(note, symbol)
             pos = int(round(sample * scale))
@@ -125,7 +126,7 @@ def extract_wave_spans(record_base: Path, fs: int, lead_names: list[str]) -> lis
                 if active is not None:
                     wave, start = active
                     if pos > start:
-                        spans.append(WaveSpan(lead_idx, start, pos, wave))
+                        annotator_spans.append(WaveSpan(lead_idx, start, pos, wave))
                     active = None
                 continue
 
@@ -134,10 +135,10 @@ def extract_wave_spans(record_base: Path, fs: int, lead_names: list[str]) -> lis
                 # early Kaggle runs even when annotations are not boundary-style.
                 half_ms = {"p": 45, "qrs": 60, "t": 90}[label]
                 half = int(round(half_ms * TARGET_FS / 1000))
-                spans.append(WaveSpan(lead_idx, max(0, pos - half), pos + half, label))
+                annotator_spans.append(WaveSpan(lead_idx, max(0, pos - half), pos + half, label))
 
-        if spans:
-            break
+        if annotator_spans:
+            spans.extend(annotator_spans)
 
     return spans
 
