@@ -12,6 +12,7 @@ data/*.db
 
 # Python
 ml/.venv/
+ml/*.egg-info/
 __pycache__/
 *.pyc
 .pytest_cache/

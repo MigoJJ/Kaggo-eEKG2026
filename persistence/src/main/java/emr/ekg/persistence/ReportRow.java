@@ -27,5 +27,6 @@ public record ReportRow(
         boolean stIschemiaAvailable,
         String signedBy,
         Instant signedAt,
-        Instant createdAt) {
+        Instant createdAt,
+        String payloadJson) {
 }

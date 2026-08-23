@@ -213,8 +213,9 @@ public final class ReportRepository {
                     triage_model_hash, triage_model_metadata_hash,
                     beat_arrhythmia_model_version, beat_arrhythmia_model_hash, beat_arrhythmia_model_metadata_hash,
                     st_ischemia_model_version, st_ischemia_model_hash, st_ischemia_model_metadata_hash,
-                    beat_arrhythmia_available, st_ischemia_available, signed_by, signed_at, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    beat_arrhythmia_available, st_ischemia_available, signed_by, signed_at, created_at,
+                    payload_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(record_id) DO UPDATE SET status=excluded.status,
                     norm_triage_score=excluded.norm_triage_score,
                     triage_model_version=excluded.triage_model_version,
@@ -229,7 +230,7 @@ public final class ReportRepository {
                     beat_arrhythmia_available=excluded.beat_arrhythmia_available,
                     st_ischemia_available=excluded.st_ischemia_available,
                     signed_by=excluded.signed_by, signed_at=excluded.signed_at,
-                    created_at=excluded.created_at
+                    created_at=excluded.created_at, payload_json=excluded.payload_json
                 """)) {
             ps.setString(1, r.recordId());
             ps.setString(2, r.status().name());
@@ -248,6 +249,7 @@ public final class ReportRepository {
             ps.setString(15, r.signedBy());
             ps.setString(16, r.signedAt() == null ? null : r.signedAt().toString());
             ps.setString(17, r.createdAt().toString());
+            ps.setString(18, r.payloadJson());
             ps.executeUpdate();
         }
     }
@@ -333,6 +335,7 @@ public final class ReportRepository {
                 rs.getInt("st_ischemia_available") != 0,
                 rs.getString("signed_by"),
                 signedAtStr == null ? null : Instant.parse(signedAtStr),
-                Instant.parse(rs.getString("created_at")));
+                Instant.parse(rs.getString("created_at")),
+                rs.getString("payload_json"));
     }
 }

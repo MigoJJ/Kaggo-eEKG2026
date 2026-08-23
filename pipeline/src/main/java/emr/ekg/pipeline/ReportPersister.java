@@ -42,7 +42,8 @@ public final class ReportPersister {
                 report.beatArrhythmiaModelMetadataHash(), report.beatArrhythmiaModelMetadataJson(),
                 report.stIschemiaModelVersion(), report.stIschemiaModelHash(),
                 report.stIschemiaModelMetadataHash(), report.stIschemiaModelMetadataJson(),
-                report.beatArrhythmiaAvailable(), report.stIschemiaAvailable(), null, null, report.createdAt());
+                report.beatArrhythmiaAvailable(), report.stIschemiaAvailable(), null, null, report.createdAt(),
+                KnownLimitations.asAuditJson());
 
         repository.save(record, features, findings, reportRow);
     }

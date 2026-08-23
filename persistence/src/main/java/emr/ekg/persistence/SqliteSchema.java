@@ -108,6 +108,7 @@ final class SqliteSchema {
             addColumnIfMissing(connection, "audit_log", "model_version", "TEXT");
             addColumnIfMissing(connection, "audit_log", "model_hash", "TEXT");
             addColumnIfMissing(connection, "audit_log", "model_metadata_hash", "TEXT");
+            addColumnIfMissing(connection, "report", "payload_json", "TEXT");
         }
     }
 

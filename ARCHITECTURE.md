@@ -293,14 +293,19 @@ EKGGDSEMR2026/
     루트 `models/`로 복사(동기화)하는 수동 단계가 필요하다.** 자동화된 배포 스크립트는 아직 없음
     (2026-07-23 기준: `stage3_beat.onnx`/`.pt`가 동기화 누락되어 있던 것을 확인·복사함).
 
-- **Phase 9 (개인 전용 보조도구 스코프)** — **빠른 안전판** (새 데이터/학습 불필요):
+- **Phase 9** ✅ **(개인 전용 보조도구 스코프)** — **빠른 안전판** (새 데이터/학습 불필요):
   - ✅ **모델 배포 동기화 자동화**(2026-08-23): `ml/sync_models.sh` 추가 — `ml/models/*.{onnx,json,pt}`
     → 루트 `models/`로 복사(`cp -p`), 내용이 이미 동일하면 skip, 다르면 경고 후 덮어쓰기(`ml/models/`가
     source of truth). `KAGGLE_STAGE3_PLAN.md`/`KAGGLE_ST_QT_LUDB_PLAN.md`의 "로컬 프로젝트 반영"
     절차에 이 스크립트 실행을 명시 스텝으로 추가함. (2026-07-23 `stage3_beat.onnx` 동기화 누락
     발견 사례 재발 방지.)
-  - 📋 app-fx 리포트 화면에 "알려진 한계" 캐비어트 노출: ischemia 룰 과발화(threshold 50µV 미보정),
-    RBBB/LBBB F1 근접 0. `report.payload_json`에도 감사기록으로 같이 저장. (미착수)
+  - ✅ **"알려진 한계" 캐비어트 노출**(2026-08-23): `pipeline`에 `KnownLimitations` 상수 클래스 추가
+    (ischemia 룰 과발화 — threshold 50µV 미보정, RBBB/LBBB F1 근접 0 — ARCHITECTURE.md Phase 6/7
+    실측 근거 그대로 인용). `app-fx`의 `ReportPanel`에 항상 노출되는 정적 경고 배너로 표시(특정
+    소견 발생 여부와 무관 — RBBB/LBBB는 위음성도 문제이므로). `persistence`의 `report` 테이블에
+    `payload_json TEXT` 컬럼 추가(`SqliteSchema.addColumnIfMissing`, 기존 마이그레이션 패턴 재사용),
+    `ReportRow`/`ReportRepository`/`ReportPersister`에 배선해 매 리포트 저장 시 감사기록으로 같이
+    저장됨. `ReportRepositoryTest`에 round-trip 회귀 테스트 추가.
 
 - **Phase 10 (계획)** 📋 — **Stage3 Kaggle 재학습(Beat 부정맥) + VT 룰**:
   - `KAGGLE_STAGE3_PLAN.md` 절차대로 Kaggle P100에서 `cnn`/`resnet`/`inception` 3종 30 epoch 학습,

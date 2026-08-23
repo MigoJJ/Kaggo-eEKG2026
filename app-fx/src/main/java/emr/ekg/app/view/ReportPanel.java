@@ -2,6 +2,7 @@ package emr.ekg.app.view;
 
 import emr.ekg.features.ClinicalFeature;
 import emr.ekg.pipeline.DiagnosticReport;
+import emr.ekg.pipeline.KnownLimitations;
 import emr.ekg.rules.Finding;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.geometry.Insets;
@@ -23,6 +24,7 @@ import java.util.List;
 public final class ReportPanel extends VBox {
 
     private final Label criticalBanner = new Label();
+    private final Label knownLimitationsLabel = new Label();
     private final Label headerLabel = new Label();
     private final Label triageLabel = new Label();
     private final TableView<Finding> findingsTable = new TableView<>();
@@ -39,6 +41,12 @@ public final class ReportPanel extends VBox {
         criticalBanner.setVisible(false);
         criticalBanner.setManaged(false);
 
+        knownLimitationsLabel.setText(KnownLimitations.DISCLAIMER_TEXT);
+        knownLimitationsLabel.setWrapText(true);
+        knownLimitationsLabel.setStyle("-fx-background-color:#fff8e1; -fx-text-fill:#8d6e00; "
+                + "-fx-font-size:11px; -fx-padding:6 10; -fx-border-color:#ffca28; -fx-border-width:0 0 0 3;");
+        knownLimitationsLabel.setMaxWidth(Double.MAX_VALUE);
+
         headerLabel.setFont(Font.font("System", FontWeight.BOLD, 14));
         triageLabel.setFont(Font.font(13));
         stageAvailabilityLabel.setStyle("-fx-text-fill:#888888; -fx-font-size:11px;");
@@ -46,7 +54,7 @@ public final class ReportPanel extends VBox {
         setupFindingsTable();
         setupFeaturesTable();
 
-        getChildren().addAll(criticalBanner, headerLabel, triageLabel,
+        getChildren().addAll(criticalBanner, knownLimitationsLabel, headerLabel, triageLabel,
                 sectionLabel("소견 (Findings)"), findingsTable,
                 sectionLabel("임상 피처 (20종)"), featuresTable,
                 stageAvailabilityLabel);

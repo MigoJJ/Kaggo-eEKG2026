@@ -25,7 +25,8 @@ class ReportRepositoryTest {
                     new FindingRow("rec-1", "AVB1", "1도 방실차단", "ABNORMAL", "PR 220ms"));
             ReportRow report = new ReportRow("rec-1", ReportStatus.PENDING_SIGN, 0.83, "logreg-v1",
                     "abc123", "meta123", "{\"version\":\"logreg-v1\"}",
-                    null, null, null, null, null, null, null, null, false, false, null, null, Instant.now());
+                    null, null, null, null, null, null, null, null, false, false, null, null, Instant.now(),
+                    "{\"known_limitations\":[]}");
 
             repo.save(record, features, findings, report);
 
@@ -35,6 +36,7 @@ class ReportRepositoryTest {
             assertEquals(0.83, found.get().normTriageScore(), 1e-9);
             assertEquals("logreg-v1", found.get().triageModelVersion());
             assertEquals("abc123", found.get().triageModelHash());
+            assertEquals("{\"known_limitations\":[]}", found.get().payloadJson());
 
             assertEquals(2, repo.findFeatures("rec-1").size());
             assertEquals(1, repo.findFindings("rec-1").size());
@@ -64,7 +66,7 @@ class ReportRepositoryTest {
             EcgRecordRow record = new EcgRecordRow("rec-2", "ptbxl:2", 500, 5000, 0.95, true, Instant.now());
             ReportRow report = new ReportRow("rec-2", ReportStatus.PENDING_SIGN, 0.5, "logreg-v1",
                     "abc123", null, null, null, null, null, null, null, null, null, null,
-                    false, false, null, null, Instant.now());
+                    false, false, null, null, Instant.now(), null);
 
             repo.save(record, List.of(new FeatureRow("rec-2", 1, "HR", 70.0, "bpm", 60, 100)),
                     List.of(new FindingRow("rec-2", "AVB1", "1도 방실차단", "ABNORMAL", "PR 220ms")), report);
@@ -84,7 +86,7 @@ class ReportRepositoryTest {
             EcgRecordRow record = new EcgRecordRow("rec-3", "ptbxl:3", 500, 5000, 0.95, true, Instant.now());
             ReportRow report = new ReportRow("rec-3", ReportStatus.PENDING_SIGN, 0.9, "logreg-v1",
                     "abc123", null, null, null, null, null, null, null, null, null, null,
-                    false, false, null, null, Instant.now());
+                    false, false, null, null, Instant.now(), null);
             repo.save(record, List.of(), List.of(), report);
 
             assertEquals(1, repo.listPendingSignatureIds().size());
