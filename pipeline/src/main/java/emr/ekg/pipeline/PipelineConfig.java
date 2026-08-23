@@ -65,6 +65,8 @@ public record PipelineConfig(
                 asDouble(emergency, "ischemia_st_depression_uv", 50) * UV_TO_MV,
                 asInt(emergency, "ischemia_contiguous_leads", 2),
                 asDouble(emergency, "longqt_qtc_ms", 500),
+                asDouble(emergency, "vt_rate_bpm", 120),
+                asDouble(emergency, "vt_qrs_ms", 120),
                 asDouble(conduction, "bbb_qrs_ms", 120),
                 asDouble(conduction, "avb1_pr_ms", 200));
 

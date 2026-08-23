@@ -96,6 +96,8 @@ class EmergencyRuleEngineTest {
                 RuleThresholds.defaults().stemiContiguousLeads(),
                 0.05, 1,
                 RuleThresholds.defaults().qtcCriticalMs(),
+                RuleThresholds.defaults().vtRateBpm(),
+                RuleThresholds.defaults().vtQrsMs(),
                 RuleThresholds.defaults().bbbQrsMs(),
                 RuleThresholds.defaults().avb1PrMs());
 

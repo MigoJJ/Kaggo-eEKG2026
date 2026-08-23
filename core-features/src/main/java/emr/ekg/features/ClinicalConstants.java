@@ -51,4 +51,9 @@ public final class ClinicalConstants {
     // 심전기축
     public static final double AXIS_NORMAL_MIN_DEG = -30;
     public static final double AXIS_NORMAL_MAX_DEG = 90;
+
+    // 심실빈맥(VT) — 3연속 이상 V-비트 + 심박수 기준(광의의 VT 정의: >100bpm, 본 파이프라인은
+    // 보수적으로 >120bpm 채택). 3단계(Stage3) 비트분류 결과에 적용(Stage3ArrhythmiaAnalyzer).
+    public static final double VT_RATE_BPM = 120;
+    public static final double VT_QRS_MS = 120;
 }

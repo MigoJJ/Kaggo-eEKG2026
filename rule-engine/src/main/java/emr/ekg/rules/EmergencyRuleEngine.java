@@ -13,8 +13,10 @@ import java.util.Map;
  * 게이팅 없이 후속 2/3/4단계와 병행 진행된다.
  *
  * 가이드가 명시적 수치 기준을 제공하는 3개 소견만 다룬다: STEMI(ST상승, 인접 리드 규칙),
- * 허혈성 ST하강, Long QT(QTc&gt;500ms). VT/VF·완전방실차단은 비트 형태학/리듬 해리 분석이
- * 필요해 이 표준 판독 가이드의 범위 밖이며 미구현이다(3단계 비트분류 이후 별도 검증 필요).
+ * 허혈성 ST하강, Long QT(QTc&gt;500ms). VT는 3단계 비트분류 결과가 있어야 판정 가능해
+ * 이 엔진의 범위 밖이며, {@code pipeline} 모듈의 {@code Stage3ArrhythmiaAnalyzer}가 연속
+ * V-비트 런을 검출해 담당한다(같은 {@link RuleThresholds#vtRateBpm()}/{@link RuleThresholds#vtQrsMs()}
+ * 값을 사용). VF·완전방실차단은 아직 미구현이다.
  *
  * 임계치는 {@link RuleThresholds}로 조정 가능하다(config/pipeline.yaml 연동, backbone 목표) —
  * 인자 없는 {@link #evaluate(List, Map)}는 {@link RuleThresholds#defaults()}를 사용한다.

@@ -16,6 +16,8 @@ public record RuleThresholds(
         double ischemiaDepressionMv,
         int ischemiaContiguousLeads,
         double qtcCriticalMs,
+        double vtRateBpm,
+        double vtQrsMs,
         double bbbQrsMs,
         double avb1PrMs) {
 
@@ -27,6 +29,8 @@ public record RuleThresholds(
                 ClinicalConstants.ST_DEPRESSION_MV,
                 2,
                 ClinicalConstants.QTC_CRITICAL_MS,
+                ClinicalConstants.VT_RATE_BPM,
+                ClinicalConstants.VT_QRS_MS,
                 ClinicalConstants.QRS_COMPLETE_BBB_MS,
                 ClinicalConstants.PR_MAX_MS);
     }

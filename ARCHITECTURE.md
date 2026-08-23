@@ -307,16 +307,24 @@ EKGGDSEMR2026/
     `ReportRow`/`ReportRepository`/`ReportPersister`에 배선해 매 리포트 저장 시 감사기록으로 같이
     저장됨. `ReportRepositoryTest`에 round-trip 회귀 테스트 추가.
 
-- **Phase 10 (계획)** 📋 — **Stage3 Kaggle 재학습(Beat 부정맥) + VT 룰**:
-  - `KAGGLE_STAGE3_PLAN.md` 절차대로 Kaggle P100에서 `cnn`/`resnet`/`inception` 3종 30 epoch 학습,
-    accuracy가 아닌 **S/V/F sensitivity** 우선으로 백본 선택, N/F·S/N 혼동 기록.
-  - `export_stage3_onnx.py`(opset17, `max_abs_diff ≤ 1e-3`) → `models/stage3_beat.onnx/.json` 교체 →
-    Phase9 동기화 스크립트 → `python -m unittest discover -s ml/tests`, `./gradlew :pipeline:test` 통과.
-  - **VT 룰 추가**(Stage3 정확도 확보 후): `RuleThresholds.java`의 기존 예약 필드 `vt_rate_bpm`/`vt_qrs_ms`
-    (`config/pipeline.yaml`에 이미 존재하나 `EmergencyRuleEngine.java`에는 아직 미연결 확인됨)를 실제 로직에
-    연결 — Stage3 beat 시퀀스 연속 V-beat ≥3 + rate>120bpm → VT 알람. `EmergencyRuleEngineTest.java`에
-    합성 V-run 회귀 테스트 추가. VF는 형태학적으로 난이도가 높아 1차는 SQI+파형 무질서도 기반의
-    저신뢰도 "coarse 후보" 플래그 수준으로만(의사 확인 전제).
+- **Phase 10 (부분 완료)** — **Stage3 Kaggle 재학습(Beat 부정맥) + VT 룰**:
+  - ✅ **VT 룰 연결**(2026-08-23): `vt_rate_bpm`/`vt_qrs_ms`(`config/pipeline.yaml`)를 `RuleThresholds`
+    필드로 승격(`ClinicalConstants.VT_RATE_BPM/VT_QRS_MS`가 기본값). `EmergencyRuleEngine`은 비트분류
+    결과에 접근할 수 없어(형태학/QTc만 다룸) 범위 밖으로 남겨두고, 대신 `Stage3ArrhythmiaAnalyzer`가
+    비트 시퀀스를 스캔해 연속 V-비트 런(≥3개)을 찾고 런 내 평균 심박수(RR간격 기반)>threshold **및**
+    평균 QRS폭≥threshold를 모두 만족하면 `"VT"`(CRITICAL) 소견을 산출하도록 구현. 분류 실패/윈도우
+    범위밖 비트는 라벨을 null로 채워 원래 시간순서상 "연속" 판정이 흐트러지지 않게 함(건너뛰지 않음).
+    `Stage3ArrhythmiaAnalyzerTest`에 합성 V-run 회귀 테스트 5건 추가(트리거/2비트 미달/저심박수/좁은
+    QRS/분류실패로 런이 끊기는 경우). ⚠️ 알람 메커니즘은 완성됐지만 신뢰도는 Stage3 비트분류 정확도에
+    종속된다 — 아래 재학습 전까지는 다른 Stage3 소견과 동일하게 "backbone, 정확도 미검증" 상태.
+    VF는 형태학적으로 난이도가 높아 여전히 미구현(1차는 SQI+파형 무질서도 기반 저신뢰도 "coarse 후보"
+    플래그로 계획).
+  - 📋 **Stage3 Kaggle 재학습**(미착수): `KAGGLE_STAGE3_PLAN.md` 절차대로 Kaggle P100에서
+    `cnn`/`resnet`/`inception` 3종 30 epoch 학습, accuracy가 아닌 **S/V/F sensitivity** 우선으로 백본
+    선택, N/F·S/N 혼동 기록. `export_stage3_onnx.py`(opset17, `max_abs_diff ≤ 1e-3`) →
+    `models/stage3_beat.onnx/.json` 교체 → `ml/sync_models.sh` → `python -m unittest discover -s
+    ml/tests`, `./gradlew :pipeline:test` 통과. **Kaggle GPU 실행이 필요해 로컬에서 대신 수행 불가 —
+    사용자가 직접 Kaggle 노트북에서 돌려야 함.**
 
 - **Phase 11 (계획)** 📋 — **Stage4 학습 데이터 확보 + 학습(ST-T 허혈, 현재 가중치 0)**:
   - Kaggle에 LUDB/QTDB(`abdessamiguebli/qtdb-ludb` 등)·European ST-T attach →

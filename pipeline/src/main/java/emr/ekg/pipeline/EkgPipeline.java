@@ -167,7 +167,7 @@ public final class EkgPipeline implements AutoCloseable {
         boolean beatArrhythmiaAvailable = beatClassifier != null;
         if (beatArrhythmiaAvailable) {
             findings.addAll(Stage3ArrhythmiaAnalyzer.analyze(
-                    ecg, beats, referenceLeadName, beatClassifier, beatArrhythmiaConfig));
+                    ecg, beats, referenceLeadName, beatClassifier, beatArrhythmiaConfig, ruleThresholds));
         }
 
         boolean stIschemiaAvailable = stIschemiaClassifier != null;
