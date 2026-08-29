@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class BeatArrhythmiaClassifierTest {
 
-    private static final Path MODEL_PATH = Path.of("/home/migowj/git/EKGGDSEMR2026/models/stage3_beat.onnx");
+    private static final Path MODEL_PATH = Path.of("/home/migojj/ittia/Kaggo-eEKG2026/models/stage3_beat.onnx");
 
     @Test
     void classifiesSyntheticBeatWindowIntoKnownClass() throws OrtException {

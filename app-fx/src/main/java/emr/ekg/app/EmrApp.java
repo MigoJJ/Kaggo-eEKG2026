@@ -49,8 +49,8 @@ public final class EmrApp extends Application {
 
     private static final Path PTBXL_ROOT = Path.of(
             "/mnt/t7/datasets/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3");
-    private static final Path CONFIG_YAML = Path.of("/home/migowj/git/EKGGDSEMR2026/config/pipeline.yaml");
-    private static final Path DB_FILE = Path.of("/home/migowj/git/EKGGDSEMR2026/data/emr.db");
+    private static final Path CONFIG_YAML = Path.of("/home/migojj/ittia/Kaggo-eEKG2026/config/pipeline.yaml");
+    private static final Path DB_FILE = Path.of("/home/migojj/ittia/Kaggo-eEKG2026/data/emr.db");
     // ecg_id 1,3,4: PTB-XL scp_codes NORM=100.0 (확인된 순수 정상 라벨). 1000도 NORM=100.0이나
     // 1도AVB/LAD 룰소견이 함께 나와 데모 다양성을 위해 포함(정상 라벨이어도 경계성 룰소견은
     // 발생할 수 있음을 보여줌).

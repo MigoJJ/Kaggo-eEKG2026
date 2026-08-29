@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class Stage4DelineatorClassifierTest {
 
-    private static final Path MODEL_PATH = Path.of("/home/migowj/git/EKGGDSEMR2026/models/stage4_delineator.onnx");
+    private static final Path MODEL_PATH = Path.of("/home/migojj/ittia/Kaggo-eEKG2026/models/stage4_delineator.onnx");
 
     @Test
     void segments12LeadEcgIntoFourClasses() throws OrtException {

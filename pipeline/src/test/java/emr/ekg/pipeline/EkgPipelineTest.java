@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class EkgPipelineTest {
 
-    private static final Path MODEL_JSON = Path.of("/home/migowj/git/EKGGDSEMR2026/models/stage1_logreg.json");
+    private static final Path MODEL_JSON = Path.of("/home/migojj/ittia/Kaggo-eEKG2026/models/stage1_logreg.json");
     private static final Path PTBXL_HEADER = Path.of(
             "/mnt/t7/datasets/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3"
                     + "/records500/00000/00001_hr.hea");
