@@ -55,18 +55,21 @@ def main() -> None:
     print(f"device={device}, model_type={args.model_type}")
 
     if args.balanced_sampler:
-        print("WeightedRandomSampler 기반 균형 샘플러 활성화 (제곱근 역수 — 완전 역수는 소수 클래스 과다 반복노출로 정밀도를 붕괴시킴)")
+        # 완전 역수(1/count) vs 제곱근 역수(1/sqrt(count)) vs 손실함수 가중치만 사용, 3가지를 비교 실측한 결과
+        # (2026-08-29, ml/results/stage3_cnn_sampler_experiments.md) 4-class(N/S/V/F) macro sensitivity 기준으로
+        # 완전 역수 재샘플링이 가장 우수했다. 재샘플링 자체가 손실함수 가중치 단독보다 낫고, 재샘플링 안에서는
+        # 완전 역수가 제곱근 역수보다 근소하게 낫다.
+        print("WeightedRandomSampler 기반 균형 샘플러 활성화 (완전 역수)")
         class_sample_counts = class_counts.tolist()
-        sqrt_inv_by_class = [1.0 / (count ** 0.5) for count in class_sample_counts]
-        sample_weights = [sqrt_inv_by_class[label] for _, label in train_ds.samples]
+        sample_weights = [1.0 / class_sample_counts[label] for _, label in train_ds.samples]
         sampler = torch.utils.data.WeightedRandomSampler(
             weights=sample_weights,
             num_samples=len(sample_weights),
             replacement=True
         )
         train_loader = DataLoader(train_ds, batch_size=args.batch_size, sampler=sampler)
-        # 샘플러가 이미 클래스 빈도를 완화했으므로, 손실함수까지 추가로 가중치를 주면 이중 보정이 되어
-        # 소수 클래스가 다시 과다 예측되므로 여기서는 CrossEntropyLoss(weight=...)를 쓰지 않는다.
+        # 샘플러가 이미 클래스 빈도를 보정하므로, 손실함수까지 추가로 가중치를 주면 이중 보정이 되어
+        # 소수 클래스가 과다 예측되므로 여기서는 CrossEntropyLoss(weight=...)를 쓰지 않는다.
         criterion = torch.nn.CrossEntropyLoss()
     else:
         print("제곱근 역수 가중치 손실함수 활성화")
@@ -80,7 +83,7 @@ def main() -> None:
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    best_acc = 0.0
+    best_macro_sens = -1.0
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -97,18 +100,33 @@ def main() -> None:
 
         model.eval()
         correct = 0
+        epoch_confusion = torch.zeros(len(CLASS_NAMES), len(CLASS_NAMES), dtype=torch.int64)
         with torch.no_grad():
             for x, y in test_loader:
                 x, y = x.to(device), y.to(device)
                 preds = model(x).argmax(dim=1)
                 correct += (preds == y).sum().item()
+                for t, p in zip(y.cpu(), preds.cpu()):
+                    epoch_confusion[t, p] += 1
         test_acc = correct / len(test_ds)
-        print(f"epoch {epoch}: train_loss={train_loss:.4f} test_acc={test_acc:.4f}")
 
-        if test_acc > best_acc:
-            best_acc = test_acc
+        # 체크포인트 선택 기준: test_acc(전체 정확도) 대신 클래스별 sensitivity의 단순평균(macro sensitivity)을
+        # 사용한다. N(다수 클래스)이 압도적인 이 데이터셋에서는 test_acc가 최고인 모델이 오히려 S/V/F 같은
+        # 임상적으로 중요한 소수 클래스를 거의 검출하지 못하는 미학습 초기 epoch일 수 있음을 실측으로 확인했다
+        # (2026-08-29 v3 실험: epoch1이 test_acc 최고였으나 S sensitivity 5.0%, F sensitivity 0.3%).
+        per_class_support = epoch_confusion.sum(dim=1)
+        per_class_sens = torch.where(
+            per_class_support > 0,
+            epoch_confusion.diag().float() / per_class_support.clamp(min=1).float(),
+            torch.zeros(len(CLASS_NAMES)),
+        )
+        macro_sens = per_class_sens.mean().item()
+        print(f"epoch {epoch}: train_loss={train_loss:.4f} test_acc={test_acc:.4f} macro_sens={macro_sens:.4f}")
+
+        if macro_sens > best_macro_sens:
+            best_macro_sens = macro_sens
             torch.save(model.state_dict(), out_path)
-            print(f"  -> best checkpoint 저장: {out_path}")
+            print(f"  -> best checkpoint 저장 (macro_sens 기준): {out_path}")
 
     # 클래스별 혼동행렬(민감도 확인용 — 특히 S/V가 임상적으로 중요)
     model.load_state_dict(torch.load(out_path, map_location=device, weights_only=True))
