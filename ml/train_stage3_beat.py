@@ -55,15 +55,18 @@ def main() -> None:
     print(f"device={device}, model_type={args.model_type}")
 
     if args.balanced_sampler:
-        print("WeightedRandomSampler 기반 균형 샘플러 활성화")
+        print("WeightedRandomSampler 기반 균형 샘플러 활성화 (제곱근 역수 — 완전 역수는 소수 클래스 과다 반복노출로 정밀도를 붕괴시킴)")
         class_sample_counts = class_counts.tolist()
-        sample_weights = [1.0 / class_sample_counts[label] for _, label in train_ds.samples]
+        sqrt_inv_by_class = [1.0 / (count ** 0.5) for count in class_sample_counts]
+        sample_weights = [sqrt_inv_by_class[label] for _, label in train_ds.samples]
         sampler = torch.utils.data.WeightedRandomSampler(
             weights=sample_weights,
             num_samples=len(sample_weights),
             replacement=True
         )
         train_loader = DataLoader(train_ds, batch_size=args.batch_size, sampler=sampler)
+        # 샘플러가 이미 클래스 빈도를 완화했으므로, 손실함수까지 추가로 가중치를 주면 이중 보정이 되어
+        # 소수 클래스가 다시 과다 예측되므로 여기서는 CrossEntropyLoss(weight=...)를 쓰지 않는다.
         criterion = torch.nn.CrossEntropyLoss()
     else:
         print("제곱근 역수 가중치 손실함수 활성화")
